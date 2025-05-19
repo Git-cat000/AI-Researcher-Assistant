@@ -1,7 +1,7 @@
 # AI Researcher Assistant  
 **An AI-powered research assistant for daily paper updates, weather, and academic news**  
 
-## 📌 功能说明  
+## 📌 预期功能说明  
 1. **启动问候**  
    - 开机后自动与用户打招呼，支持自定义用户名（如“你好，张三！”）  
    - 考虑语音交互功能 
