@@ -1,11 +1,11 @@
 """LLM 工厂函数"""
 from typing import Optional
-from physicist_agent.core.config import LLMConfig, get_config
-from physicist_agent.llm.base import BaseLLM
-from physicist_agent.llm.openai import OpenAILLM
-from physicist_agent.llm.anthropic import AnthropicLLM
-from physicist_agent.llm.local import OllamaLLM
-from physicist_agent.core.exceptions import ConfigurationError
+from AI-Researcher-Assistant.core.config import LLMConfig, get_config
+from AI-Researcher-Assistant.llm.base import BaseLLM
+from AI-Researcher-Assistant.llm.openai import OpenAILLM
+from AI-Researcher-Assistant.llm.anthropic import AnthropicLLM
+from AI-Researcher-Assistant.llm.local import OllamaLLM
+from AI-Researcher-Assistant.core.exceptions import ConfigurationError
 
 
 def create_llm(config: Optional[LLMConfig] = None) -> BaseLLM:
