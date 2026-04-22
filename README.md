@@ -32,7 +32,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/Git-cat000/AI-Researcher-Assistant-assistant.git
+git clone https://github.com/Git-cat000/AI-Researcher-Assistant.git
 cd AI-Researcher-Assistant
 
 # 创建并激活虚拟环境
