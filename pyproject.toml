@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-researcher-assistant"
+version = "0.1.0"
+description = "An intelligent agent framework for academic research"
+readme = "README.md"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=1.0.0",
+    "anthropic>=0.30.0",
+    "aiohttp>=3.9.0",
+    "chromadb>=0.5.0",
+    "arxiv>=2.1.0",
+    "pypdf>=4.0.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "black>=24.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Git-cat000/AI-Researcher-Assistant"
+Repository = "https://github.com/Git-cat000/AI-Researcher-Assistant.git"
+Issues = "https://github.com/Git-cat000/AI-Researcher-Assistant/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ai_researcher_assistant*"]
+
+[tool.black]
+line-length = 120
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 120
+select = ["E", "F", "I", "N", "W", "UP"]
