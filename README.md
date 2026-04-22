@@ -3,7 +3,7 @@
 
 
 ## 基础架构
-text
+\text
 physicist-agent/                      
 ├── physicist_agent/                  # 核心源码包
 │   ├── __init__.py
@@ -69,7 +69,7 @@ physicist-agent/
 ├── pyproject.toml
 ├── README.md
 └── .env.example
-text
+\text
 
 ## 📌 预期功能说明  
 1. **启动问候**  
