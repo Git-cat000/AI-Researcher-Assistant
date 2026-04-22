@@ -213,8 +213,7 @@ pytest tests/ -v
 
 ## 🤝 贡献指南
 
-欢迎贡献！请参阅 `CONTRIBUTING.md` 了解以下内容：
-
+欢迎贡献！本项目仍需完善，部分功能暂未实现。
 - 报告 Bug
 - 提出新功能建议
 - 提交 Pull Request 的流程
