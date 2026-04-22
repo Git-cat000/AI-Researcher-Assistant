@@ -1,6 +1,6 @@
-"""Physicist Agent Framework - Core Module"""
+"""AI-Researcher-Assistant Framework - Core Module"""
 
-from physicist_agent.core.config import (
+from AI-Researcher-Assistant.core.config import (
     AgentConfig,
     LLMConfig,
     MemoryConfig,
@@ -8,19 +8,19 @@ from physicist_agent.core.config import (
     get_config,
     update_config,
 )
-from physicist_agent.core.exceptions import (
+from AI-Researcher-Assistant.core.exceptions import (
     AgentError,
     LLMError,
     SkillError,
     MemoryError,
     ConfigurationError,
 )
-from physicist_agent.core.message import (
+from AI-Researcher-Assistant.core.message import (
     Message,
     Conversation,
     MessageRole,
 )
-from physicist_agent.core.base_agent import BaseAgent
+from AI-Researcher-Assistant.core.base_agent import BaseAgent
 
 __all__ = [
     # Config
