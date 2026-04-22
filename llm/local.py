@@ -5,8 +5,8 @@ from typing import List, Dict, Any, Optional, AsyncIterator
 import aiohttp
 import requests
 
-from physicist_agent.llm.base import BaseLLM, LLMResponse
-from physicist_agent.core.exceptions import LLMError
+from AI-Researcher-Assistant.llm.base import BaseLLM, LLMResponse
+from AI-Researcher-Assistant.core.exceptions import LLMError
 
 
 class OllamaLLM(BaseLLM):
