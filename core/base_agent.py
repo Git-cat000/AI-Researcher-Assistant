@@ -4,8 +4,8 @@ Agent 基类。
 """
 from abc import ABC, abstractmethod
 from typing import Optional, Any, Dict, List, AsyncIterator
-from physicist_agent.core.message import Conversation, MessageRole
-from physicist_agent.core.config import AgentConfig, get_config
+from AI-Researcher-Assistant.core.message import Conversation, MessageRole
+from AI-Researcher-Assistant.core.config import AgentConfig, get_config
 
 
 class BaseAgent(ABC):
