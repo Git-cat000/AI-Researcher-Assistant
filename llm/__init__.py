@@ -1,10 +1,10 @@
 """Physicist Agent Framework - LLM Module"""
 
-from physicist_agent.llm.base import BaseLLM, LLMResponse
-from physicist_agent.llm.openai import OpenAILLM
-from physicist_agent.llm.anthropic import AnthropicLLM
-from physicist_agent.llm.local import OllamaLLM
-from physicist_agent.llm.factory import create_llm, get_llm
+from AI-Researcher-Assistant.llm.base import BaseLLM, LLMResponse
+from AI-Researcher-Assistant.llm.openai import OpenAILLM
+from AI-Researcher-Assistant.llm.anthropic import AnthropicLLM
+from AI-Researcher-Assistant.llm.local import OllamaLLM
+from AI-Researcher-Assistant.llm.factory import create_llm, get_llm
 
 __all__ = [
     "BaseLLM",
