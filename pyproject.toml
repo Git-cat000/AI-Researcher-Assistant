@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "An intelligent agent framework for academic research"
 readme = "README.md"
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "AI Researcher Assistant Contributors"}
 ]
 license = "MIT"
 classifiers = [
@@ -66,3 +66,9 @@ select = ["E", "F", "I", "N", "W", "UP"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+disable_error_code = ["import-untyped"]
+warn_unused_ignores = false

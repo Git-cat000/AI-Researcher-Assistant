@@ -49,7 +49,7 @@ class BaseLLM(ABC):
         pass
 
     @abstractmethod
-    async def stream_generate(self, messages: list[dict[str, str]], **kwargs) -> AsyncIterator[str]:
+    def stream_generate(self, messages: list[dict[str, str]], **kwargs) -> AsyncIterator[str]:
         """
         流式生成回复，逐步产出文本片段。
 

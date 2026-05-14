@@ -8,7 +8,6 @@ from typing import Any
 from ai_researcher_assistant.core.base_agent import BaseAgent
 from ai_researcher_assistant.core.config import AgentConfig
 from ai_researcher_assistant.core.message import Conversation
-from ai_researcher_assistant.harness.context import AgentContext
 from ai_researcher_assistant.llm import BaseLLM, create_llm
 from ai_researcher_assistant.memory import AcademicRAG, ShortTermMemory
 from ai_researcher_assistant.orchestration.loop import ReActLoop
@@ -112,7 +111,7 @@ class ResearcherAgent(BaseAgent):
         for char in answer:
             yield char
 
-    def _build_context(self) -> AgentContext:
+    def _build_context(self) -> dict[str, Any]:
         return {
             "llm": self.llm,
             "conversation": self._build_conversation(),

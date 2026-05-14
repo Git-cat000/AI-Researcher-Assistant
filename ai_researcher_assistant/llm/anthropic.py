@@ -2,7 +2,7 @@
 
 import os
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 from ai_researcher_assistant.core.exceptions import LLMError
 from ai_researcher_assistant.llm.base import BaseLLM, LLMResponse
@@ -50,7 +50,8 @@ class AnthropicLLM(BaseLLM):
     def generate(self, messages: list[dict[str, str]], **kwargs: Any) -> LLMResponse:
         try:
             system, converted_messages = self._convert_messages(messages)
-            response = self.client.messages.create(
+            create = cast(Any, self.client.messages.create)
+            response = create(
                 model=self.model,
                 messages=converted_messages,
                 system=system or self._anthropic.NOT_GIVEN,
@@ -66,7 +67,8 @@ class AnthropicLLM(BaseLLM):
     async def agenerate(self, messages: list[dict[str, str]], **kwargs: Any) -> LLMResponse:
         try:
             system, converted_messages = self._convert_messages(messages)
-            response = await self.async_client.messages.create(
+            create = cast(Any, self.async_client.messages.create)
+            response = await create(
                 model=self.model,
                 messages=converted_messages,
                 system=system or self._anthropic.NOT_GIVEN,
@@ -82,7 +84,8 @@ class AnthropicLLM(BaseLLM):
     async def stream_generate(self, messages: list[dict[str, str]], **kwargs: Any) -> AsyncIterator[str]:
         try:
             system, converted_messages = self._convert_messages(messages)
-            async with self.async_client.messages.stream(
+            stream = cast(Any, self.async_client.messages.stream)
+            async with stream(
                 model=self.model,
                 messages=converted_messages,
                 system=system or self._anthropic.NOT_GIVEN,

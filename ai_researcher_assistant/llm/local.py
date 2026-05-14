@@ -3,6 +3,7 @@
 import json
 import os
 from collections.abc import AsyncIterator
+from typing import Any
 
 import aiohttp
 import requests
@@ -20,14 +21,15 @@ class OllamaLLM(BaseLLM):
         base_url: str | None = None,
         temperature: float = 0.0,
         max_tokens: int = 4096,
-        **kwargs,
+        **kwargs: Any,
     ):
         super().__init__(model, temperature, max_tokens, **kwargs)
 
-        self.base_url = (base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
+        configured_url = base_url or os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434"
+        self.base_url = configured_url.rstrip("/")
         self.generate_url = f"{self.base_url}/api/chat"
 
-    def generate(self, messages: list[dict[str, str]], **kwargs) -> LLMResponse:
+    def generate(self, messages: list[dict[str, str]], **kwargs: Any) -> LLMResponse:
         try:
             payload = {
                 "model": self.model,
@@ -57,7 +59,7 @@ class OllamaLLM(BaseLLM):
         except Exception as e:
             raise LLMError(f"Ollama API error: {str(e)}") from e
 
-    async def agenerate(self, messages: list[dict[str, str]], **kwargs) -> LLMResponse:
+    async def agenerate(self, messages: list[dict[str, str]], **kwargs: Any) -> LLMResponse:
         try:
             payload = {
                 "model": self.model,
@@ -69,8 +71,9 @@ class OllamaLLM(BaseLLM):
                 },
             }
 
+            timeout = aiohttp.ClientTimeout(total=120)
             async with aiohttp.ClientSession() as session:
-                async with session.post(self.generate_url, json=payload, timeout=120) as resp:
+                async with session.post(self.generate_url, json=payload, timeout=timeout) as resp:
                     resp.raise_for_status()
                     data = await resp.json()
 
@@ -88,7 +91,7 @@ class OllamaLLM(BaseLLM):
         except Exception as e:
             raise LLMError(f"Ollama async API error: {str(e)}") from e
 
-    async def stream_generate(self, messages: list[dict[str, str]], **kwargs) -> AsyncIterator[str]:
+    async def stream_generate(self, messages: list[dict[str, str]], **kwargs: Any) -> AsyncIterator[str]:
         try:
             payload = {
                 "model": self.model,
@@ -100,8 +103,9 @@ class OllamaLLM(BaseLLM):
                 },
             }
 
+            timeout = aiohttp.ClientTimeout(total=120)
             async with aiohttp.ClientSession() as session:
-                async with session.post(self.generate_url, json=payload, timeout=120) as resp:
+                async with session.post(self.generate_url, json=payload, timeout=timeout) as resp:
                     resp.raise_for_status()
                     async for line in resp.content:
                         if line:

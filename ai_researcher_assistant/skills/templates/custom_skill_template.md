@@ -6,6 +6,7 @@ description: Describe what this skill does and when an agent should use it.
 # Custom Skill Template
 
 Use this template to document a custom skill before or alongside its Python implementation.
+The same Markdown shape is compatible with Claude Code and Codex style skill files when saved as `SKILL.md`.
 
 ## When To Use
 
@@ -86,3 +87,10 @@ ai_researcher_assistant/skills/builtin/
 ```
 
 `skills/builtin/` is the only built-in skill package path.
+
+Quality checks for a skill change should include:
+
+```bash
+python -m ruff check ai_researcher_assistant tests examples
+python -m pytest tests/ -v
+```

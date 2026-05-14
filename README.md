@@ -8,23 +8,23 @@ The project follows a harness-first design principle inspired by `learn-claude-c
 
 - Searches arXiv papers through built-in skills.
 - Reads and extracts PDF text and sections.
-- Stores paper abstracts and chunks in a ChromaDB-backed long-term memory.
-- Builds academic RAG context for LLM calls.
+- Stores paper abstracts and chunks in an in-memory vector store by default, with optional ChromaDB persistence.
+- Builds academic RAG context for LLM calls without requiring live embedding APIs in local tests.
 - Supports OpenAI, Anthropic, and Ollama adapters.
 - Supports OpenAI-compatible provider aliases such as DeepSeek, OpenRouter, SiliconFlow, Qwen, and Azure OpenAI through `base_url`.
 - Runs tasks through ReAct, Plan-and-Execute, LLMCompiler-style, or graph-based orchestration.
-- Lets developers add custom skills as Python classes.
+- Lets developers add custom skills as Python classes or Claude Code / Codex style Markdown files.
 
 ## Project Status
 
-This repository is an early alpha. The current implementation is useful as an architecture prototype, but several issues are known:
+This repository is an alpha-stage but runnable research-agent harness. The current baseline has been cleaned up around these boundaries:
 
-- Markdown documentation had encoding corruption and duplicated content.
-- Tests do not run in a fresh environment until dependencies are installed.
-- Importing the package can eagerly import optional LLM provider packages.
-- Global mutable configuration and singleton skill registry reduce test isolation.
-- Some tools call the LLM internally, which violates the harness boundary.
-- Several parsing and error-handling paths need hardening.
+- Package import is lazy around optional provider SDKs.
+- `SkillRegistry` can be instantiated per agent or per test.
+- Built-in skills live only under `ai_researcher_assistant/skills/builtin/`.
+- `PaperWriterSkill` returns structured prompts instead of calling an LLM internally.
+- `AcademicRAG` works locally with deterministic hash embeddings and can opt into ChromaDB persistence.
+- The current quality gate covers Ruff, mypy, pytest, compileall, pip check, and package build.
 
 Chinese documentation is available in `README.zh-CN.md`, and the detailed technical design is in `TECHNICAL_DESIGN.zh-CN.md`.
 
@@ -64,6 +64,9 @@ ANTHROPIC_API_KEY=sk-ant-...
 OLLAMA_BASE_URL=http://localhost:11434
 DEEPSEEK_API_KEY=...
 OPENROUTER_API_KEY=...
+SILICONFLOW_API_KEY=...
+DASHSCOPE_API_KEY=...
+AZURE_OPENAI_API_KEY=...
 ```
 
 ## Quick Start
@@ -93,10 +96,11 @@ asyncio.run(main())
 
 ```bash
 pip install -e ".[dev]"          # Install package with development dependencies
-pytest tests/ -v                 # Run all tests
-pytest tests/test_basic.py -v    # Run one test file
-black ai_researcher_assistant/   # Format code, line length 120
-ruff check ai_researcher_assistant/  # Lint selected rules
+python -m ruff check ai_researcher_assistant tests examples
+python -m mypy ai_researcher_assistant
+python -m pytest tests/ -v
+python -m compileall ai_researcher_assistant tests examples
+python -m build
 ```
 
 ## Repository Layout
@@ -105,8 +109,8 @@ ruff check ai_researcher_assistant/  # Lint selected rules
 ai_researcher_assistant/
   core/             Base classes, config dataclasses, messages, exceptions
   llm/              OpenAI, Anthropic, and Ollama adapters plus factory helpers
-  memory/           Short-term memory, ChromaDB long-term memory, academic RAG
-  skills/           Skill base classes, registry, loader, built-in skills
+  memory/           Short-term memory, in-memory vector memory, ChromaDB backend, academic RAG
+  skills/           Skill base classes, registry, loader, Markdown skills, builtin skills
   orchestration/    Agent, loops, execution state, graph, middleware
 examples/           Example research-assistant workflows
 tests/              Unit tests using mock LLMs
@@ -214,13 +218,17 @@ rag.add_paper(
 print(rag.search_papers("grounded retrieval", top_k=1))
 ```
 
-## Testing Notes
+## Quality Gate
 
-The test suite is intended to use mock LLMs and should not require live API keys. If tests fail during import with missing provider packages, install development dependencies first:
+The test suite uses mock LLMs and should not require live API keys. The current local release check is:
 
 ```bash
-pip install -e ".[dev]"
-pytest tests/ -v
+python -m ruff check ai_researcher_assistant tests examples
+python -m mypy ai_researcher_assistant
+python -m pytest tests/ -v
+python -m compileall ai_researcher_assistant tests examples
+python -m pip check
+python -m build
 ```
 
 ## License

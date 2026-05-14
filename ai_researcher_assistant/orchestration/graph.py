@@ -191,8 +191,8 @@ class CompiledGraph:
             self.adjacency[source].extend(edges)
 
     async def run(self, initial_state: GraphState, max_steps: int = 50) -> GraphState:
-        current_node = self.entry_point
-        state = initial_state.copy()
+        current_node: str | None = self.entry_point
+        state = GraphState(initial_state.copy())
         step_count = 0
 
         if "execution_state" in state:

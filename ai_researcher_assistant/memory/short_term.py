@@ -90,7 +90,7 @@ class ShortTermMemory(BaseMemory):
         获取格式化的上下文，用于 LLM API 调用。
         """
         max_tokens = max_tokens or self.max_tokens
-        messages = []
+        messages: list[dict[str, str]] = []
         current_tokens = 0
 
         # 从旧到新添加，直到接近 token 限制

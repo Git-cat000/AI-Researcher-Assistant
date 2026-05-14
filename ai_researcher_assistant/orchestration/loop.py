@@ -463,13 +463,13 @@ Example:
     async def _execute_dag(self, dag: dict[str, Any], state: ExecutionState, context: dict[str, Any]) -> dict[str, Any]:
         """执行 DAG"""
         subtasks = {t["id"]: t for t in dag.get("subtasks", [])}
-        completed = set()
-        results = {}
+        completed: set[str] = set()
+        results: dict[str, Any] = {}
         step_counter = 0
 
         while len(completed) < len(subtasks):
             # 找出所有依赖已满足且未执行的子任务
-            ready = []
+            ready: list[tuple[str, dict[str, Any]]] = []
             for tid, task in subtasks.items():
                 if tid in completed:
                     continue
@@ -482,7 +482,7 @@ Example:
                 break
 
             # 并行执行
-            async def exec_one(tid, task):
+            async def exec_one(tid: str, task: dict[str, Any]) -> tuple[str, dict[str, Any]]:
                 if task.get("skill"):
                     result = await self._execute_skill(task["skill"], task.get("parameters", {}), context)
                     return tid, result

@@ -38,7 +38,7 @@ class SkillLoader:
             加载的技能实例列表
         """
         module = importlib.import_module(module_path)
-        skills = []
+        skills: list[BaseSkill] = []
         for attr_name in dir(module):
             attr = getattr(module, attr_name)
             if isinstance(attr, type) and issubclass(attr, BaseSkill) and attr is not BaseSkill:
@@ -56,7 +56,7 @@ class SkillLoader:
         Returns:
             加载的技能实例列表
         """
-        skills = []
+        skills: list[BaseSkill] = []
         dir_path = Path(directory)
         if not dir_path.exists():
             logger.warning(f"Directory not found: {directory}")
@@ -111,7 +111,7 @@ class SkillLoader:
 
     def load_builtin_skills(self) -> list[BaseSkill]:
         """加载所有内置技能"""
-        skills = []
+        skills: list[BaseSkill] = []
         builtin_classes = [
             "ai_researcher_assistant.skills.builtin.arxiv_fetcher.ArxivFetcherSkill",
             "ai_researcher_assistant.skills.builtin.paper_reader.PaperReaderSkill",

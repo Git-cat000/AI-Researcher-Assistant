@@ -5,8 +5,8 @@ and orchestration loops.
 """
 
 __version__ = "0.1.0"
-__author__ = "Your Name"
-__email__ = "your.email@example.com"
+__author__ = "AI Researcher Assistant Contributors"
+__email__ = ""
 
 from ai_researcher_assistant.core import (
     AgentConfig,

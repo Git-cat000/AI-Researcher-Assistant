@@ -119,7 +119,7 @@ The skill returns full text and optionally structured sections.
             if temp_file and os.path.exists(temp_file):
                 os.unlink(temp_file)
 
-    def _load_pdf_reader(self):
+    def _load_pdf_reader(self) -> Any | None:
         try:
             from pypdf import PdfReader
 
@@ -135,7 +135,7 @@ The skill returns full text and optionally structured sections.
     def _extract_sections(self, text: str) -> dict[str, str]:
         """Extract common paper sections with simple heading heuristics."""
 
-        sections = {}
+        sections: dict[str, str] = {}
         patterns = {
             "abstract": r"(?i)(abstract|summary)",
             "introduction": r"(?i)(introduction|background)",
@@ -146,8 +146,8 @@ The skill returns full text and optionally structured sections.
             "references": r"(?i)(references?|bibliography)",
         }
 
-        current_section = None
-        section_content = []
+        current_section: str | None = None
+        section_content: list[str] = []
         for line in text.split("\n"):
             line_stripped = line.strip()
             if not line_stripped:

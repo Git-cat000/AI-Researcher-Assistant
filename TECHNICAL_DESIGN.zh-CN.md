@@ -1,6 +1,6 @@
 # AI Researcher Assistant 中文技术文档
 
-本文档说明 AI Researcher Assistant 当前的技术架构、每个模块的实现方式、核心数据流、扩展方式和后续技术规划。
+本文档说明 AI Researcher Assistant 当前的技术架构、每个模块的实现方式、核心数据流、扩展方式、质量门和后续技术规划。
 
 ## 1. 总体设计
 
@@ -127,8 +127,9 @@ class AgentContext(TypedDict, total=False):
 作用：
 
 - 明确执行循环和工具之间共享哪些上下文。
-- 避免随意传递无约束的 `dict[str, Any]`。
-- 为后续 mypy 和 schema 校验打基础。
+- 作为 Harness 上下文的文档化契约。
+- 当前运行时仍使用普通 `dict[str, Any]`，避免 TypedDict 与可变上下文在类型系统中的兼容问题。
+- 为后续 schema 校验和更严格的 mypy 配置打基础。
 
 ### 3.2 parsing.py
 
@@ -166,7 +167,7 @@ Action:
 class BaseLLM:
     def generate(...)
     async def agenerate(...)
-    async def stream_generate(...)
+    def stream_generate(...) -> AsyncIterator[str]
 ```
 
 返回结构为 `LLMResponse`：
@@ -654,14 +655,22 @@ tests/test_harness_refactor.py::test_agent_flow_with_markdown_skill
 本地验证命令：
 
 ```bash
+python -m ruff check ai_researcher_assistant tests examples
+python -m mypy ai_researcher_assistant
 python -m compileall ai_researcher_assistant tests examples
 python -m pytest tests/ -v
+python -m pip check
+python -m build
 ```
 
 当前结果：
 
 ```text
+ruff: All checks passed
+mypy: Success, no issues found in 36 source files
 11 passed
+pip check: No broken requirements found
+build: wheel/sdist generated successfully
 ```
 
 ## 10. 后续技术规划
@@ -699,5 +708,5 @@ python -m pytest tests/ -v
 
 - 增加 CI。
 - 增加 coverage。
-- 增加 mypy。
+- 提高 mypy 严格度，逐步为更多未标注函数开启 `check_untyped_defs`。
 - 补全 long_term memory 和 graph integration tests。
