@@ -668,8 +668,7 @@ python -m pytest tests/ -v
 
 ### 10.1 Skill 系统
 
-- `skills/builtin/` 已作为拼写正确的内置技能入口。
-- `skills/buildin/` 保留为旧路径兼容入口。
+- `skills/builtin/` 是唯一的内置技能入口，历史拼写错误目录已删除。
 - 支持 Markdown Skill 中声明参数 schema。
 - 支持 Markdown Skill 的资源按需读取策略。
 - 为 scripts 增加明确权限边界，默认不自动执行。

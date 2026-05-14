@@ -85,4 +85,4 @@ Built-in examples currently live in:
 ai_researcher_assistant/skills/builtin/
 ```
 
-The legacy `skills/buildin/` package is still available as a compatibility alias.
+`skills/builtin/` is the only built-in skill package path.

@@ -1,17 +1,21 @@
-"""Compatibility package for built-in skills."""
+"""Built-in skills.
+
+External skill dependencies are imported lazily so one built-in skill can be
+tested without installing every integration package.
+"""
 
 
 def __getattr__(name: str):
     if name == "ArxivFetcherSkill":
-        from ai_researcher_assistant.skills.buildin.arxiv_fetcher import ArxivFetcherSkill
+        from ai_researcher_assistant.skills.builtin.arxiv_fetcher import ArxivFetcherSkill
 
         return ArxivFetcherSkill
     if name == "PaperReaderSkill":
-        from ai_researcher_assistant.skills.buildin.paper_reader import PaperReaderSkill
+        from ai_researcher_assistant.skills.builtin.paper_reader import PaperReaderSkill
 
         return PaperReaderSkill
     if name == "PaperWriterSkill":
-        from ai_researcher_assistant.skills.buildin.paper_writer import PaperWriterSkill
+        from ai_researcher_assistant.skills.builtin.paper_writer import PaperWriterSkill
 
         return PaperWriterSkill
     raise AttributeError(name)
