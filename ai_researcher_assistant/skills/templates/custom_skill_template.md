@@ -82,7 +82,7 @@ class CustomSkill(BaseSkill):
 Built-in examples currently live in:
 
 ```text
-ai_researcher_assistant/skills/buildin/
+ai_researcher_assistant/skills/builtin/
 ```
 
-The directory name is currently `buildin`, not `builtin`.
+The legacy `skills/buildin/` package is still available as a compatibility alias.

@@ -5,33 +5,33 @@
 - PlanAndExecuteLoop: 先规划后执行的模式
 - LLMCompiler: 并行执行独立任务的模式
 """
-import json
-import re
+
 import asyncio
-from typing import Dict, Any, Optional, Tuple, List, Union
+import json
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-import logging
+from typing import Any
 
-from ai_researcher_assistant.llm import BaseLLM
-from ai_researcher_assistant.skills.registry import SkillRegistry
-from ai_researcher_assistant.orchestration.state import ExecutionState, ExecutionStep, ExecutionStatus
-from ai_researcher_assistant.orchestration.middleware import MiddlewareManager
 from ai_researcher_assistant.core.message import Conversation, MessageRole
-from ai_researcher_assistant.core.exceptions import SkillError, LLMError
 from ai_researcher_assistant.harness.parsing import (
     extract_action,
     extract_final_answer,
     extract_json_block,
     extract_thought,
 )
+from ai_researcher_assistant.llm import BaseLLM
+from ai_researcher_assistant.orchestration.middleware import MiddlewareManager
+from ai_researcher_assistant.orchestration.state import ExecutionState, ExecutionStatus, ExecutionStep
+from ai_researcher_assistant.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
 
 
 class LoopType(str, Enum):
     """执行循环类型"""
+
     REACT = "react"
     PLAN_EXECUTE = "plan_execute"
     LLM_COMPILER = "llm_compiler"
@@ -40,6 +40,7 @@ class LoopType(str, Enum):
 @dataclass
 class LoopConfig:
     """执行循环配置"""
+
     loop_type: LoopType = LoopType.REACT
     max_steps: int = 20
     max_plan_steps: int = 10
@@ -55,9 +56,9 @@ class BaseLoop(ABC):
     def __init__(
         self,
         llm: BaseLLM,
-        skill_registry: Optional[SkillRegistry] = None,
-        middleware_manager: Optional[MiddlewareManager] = None,
-        config: Optional[LoopConfig] = None,
+        skill_registry: SkillRegistry | None = None,
+        middleware_manager: MiddlewareManager | None = None,
+        config: LoopConfig | None = None,
     ):
         self.llm = llm
         self.skill_registry = skill_registry or SkillRegistry()
@@ -73,7 +74,7 @@ You must reason step by step and use skills when necessary.
 """
 
     @abstractmethod
-    async def run(self, task: str, context: Dict[str, Any]) -> ExecutionState:
+    async def run(self, task: str, context: dict[str, Any]) -> ExecutionState:
         """运行执行循环"""
         pass
 
@@ -83,8 +84,8 @@ You must reason step by step and use skills when necessary.
         return self.base_system_prompt.format(skill_instructions=skill_instructions)
 
     async def _execute_skill(
-        self, skill_name: str, parameters: Dict[str, Any], context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, skill_name: str, parameters: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         """执行单个技能（带重试）"""
         for attempt in range(self.config.max_retries):
             try:
@@ -97,7 +98,7 @@ You must reason step by step and use skills when necessary.
                 await asyncio.sleep(self.config.retry_delay)
         return {"success": False, "error": "Max retries exceeded"}
 
-    def _format_observation(self, skill_name: str, result: Dict[str, Any]) -> str:
+    def _format_observation(self, skill_name: str, result: dict[str, Any]) -> str:
         """格式化技能执行结果为观察文本"""
         if result.get("success"):
             data = result.get("result", {})
@@ -107,7 +108,7 @@ You must reason step by step and use skills when necessary.
                 for p in papers[:5]:
                     lines.append(f"- {p.get('title')} (arXiv:{p.get('arxiv_id')})")
                 if len(papers) > 5:
-                    lines.append(f"... and {len(papers)-5} more.")
+                    lines.append(f"... and {len(papers) - 5} more.")
                 return "\n".join(lines)
             else:
                 return json.dumps(data, indent=2, ensure_ascii=False)
@@ -154,7 +155,7 @@ Important rules:
         skill_instructions = self.skill_registry.get_instructions_for_all()
         return self.base_system_prompt.format(skill_instructions=skill_instructions) + "\n" + self.react_system_prompt
 
-    async def run(self, task: str, context: Dict[str, Any]) -> ExecutionState:
+    async def run(self, task: str, context: dict[str, Any]) -> ExecutionState:
         """运行 ReAct 循环"""
         state = ExecutionState(max_steps=self.config.max_steps)
         state.start_task(task)
@@ -219,8 +220,8 @@ Important rules:
         return state
 
     async def _think(
-        self, conversation: Conversation, state: ExecutionState, context: Dict[str, Any]
-    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        self, conversation: Conversation, state: ExecutionState, context: dict[str, Any]
+    ) -> tuple[str, dict[str, Any] | None]:
         """调用 LLM 进行思考"""
         messages = conversation.get_context_window()
         response = await self.llm.agenerate(messages, temperature=self.config.temperature)
@@ -238,11 +239,11 @@ Important rules:
         """提取 Thought 部分"""
         return extract_thought(text)
 
-    def _extract_action(self, text: str) -> Optional[Dict[str, Any]]:
+    def _extract_action(self, text: str) -> dict[str, Any] | None:
         """提取 JSON 格式的 Action"""
         return extract_action(text)
 
-    def _extract_final_answer(self, text: str) -> Optional[str]:
+    def _extract_final_answer(self, text: str) -> str | None:
         """提取最终答案"""
         return extract_final_answer(text)
 
@@ -270,7 +271,8 @@ class PlanAndExecuteLoop(BaseLoop):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.plan_system_prompt = """You are a planning agent. Given a task, create a step-by-step plan to accomplish it.
+        self.plan_system_prompt = """You are a planning agent.
+Given a task, create a step-by-step plan to accomplish it.
 
 Output your plan as a JSON list of steps. Each step should have:
 - "step": step number
@@ -281,8 +283,18 @@ Output your plan as a JSON list of steps. Each step should have:
 Example:
 [//]: # (JSON array example)
 [
-  {"step": 1, "description": "Search for recent papers on quantum gravity", "skill": "arxiv_fetcher", "parameters": {"query": "quantum gravity", "max_results": 5}},
-  {"step": 2, "description": "Read and summarize the most relevant paper", "skill": "paper_reader", "parameters": {"url": "from previous step"}},
+  {
+    "step": 1,
+    "description": "Search for recent papers on quantum gravity",
+    "skill": "arxiv_fetcher",
+    "parameters": {"query": "quantum gravity", "max_results": 5}
+  },
+  {
+    "step": 2,
+    "description": "Read and summarize the most relevant paper",
+    "skill": "paper_reader",
+    "parameters": {"url": "from previous step"}
+  },
   {"step": 3, "description": "Provide a summary to the user", "skill": null, "parameters": {}}
 ]
 """
@@ -291,7 +303,7 @@ Example:
         skill_instructions = self.skill_registry.get_instructions_for_all()
         return self.base_system_prompt.format(skill_instructions=skill_instructions) + "\n" + self.plan_system_prompt
 
-    async def run(self, task: str, context: Dict[str, Any]) -> ExecutionState:
+    async def run(self, task: str, context: dict[str, Any]) -> ExecutionState:
         state = ExecutionState(max_steps=self.config.max_plan_steps)
         state.start_task(task)
 
@@ -323,7 +335,9 @@ Example:
                 await self.middleware.trigger_before_think(state, context)
 
                 if skill_name:
-                    await self.middleware.trigger_before_act(state, {"skill": skill_name, "parameters": parameters}, context)
+                    await self.middleware.trigger_before_act(
+                        state, {"skill": skill_name, "parameters": parameters}, context
+                    )
                     result = await self._execute_skill(skill_name, parameters, context)
                     await self.middleware.trigger_after_act(state, result, context)
 
@@ -356,7 +370,7 @@ Example:
 
         return state
 
-    async def _generate_plan(self, conversation: Conversation) -> Optional[List[Dict[str, Any]]]:
+    async def _generate_plan(self, conversation: Conversation) -> list[dict[str, Any]] | None:
         """生成执行计划"""
         messages = conversation.get_context_window()
         response = await self.llm.agenerate(messages, temperature=0.0)
@@ -364,9 +378,7 @@ Example:
         parsed = extract_json_block(response.content)
         return parsed if isinstance(parsed, list) else None
 
-    async def _synthesize_answer(
-        self, task: str, plan: List[Dict], results: Dict, conversation: Conversation
-    ) -> str:
+    async def _synthesize_answer(self, task: str, plan: list[dict], results: dict, conversation: Conversation) -> str:
         """综合计划执行结果生成最终答案"""
         prompt = f"""Based on the execution of the plan for task: "{task}"
 
@@ -375,7 +387,7 @@ Plan steps and results:
 
 Please provide a comprehensive final answer to the user's original task.
 Include citations and references where appropriate."""
-        
+
         conversation.add(MessageRole.USER, prompt)
         messages = conversation.get_context_window()
         response = await self.llm.agenerate(messages, temperature=0.0)
@@ -388,7 +400,7 @@ class LLMCompilerLoop(BaseLoop):
     借鉴 LLMCompiler 论文思想，先识别可并行执行的独立任务，然后并行调用技能。
     """
 
-    async def run(self, task: str, context: Dict[str, Any]) -> ExecutionState:
+    async def run(self, task: str, context: dict[str, Any]) -> ExecutionState:
         state = ExecutionState(max_steps=self.config.max_steps)
         state.start_task(task)
 
@@ -410,21 +422,35 @@ class LLMCompilerLoop(BaseLoop):
 
         return state
 
-    async def _parse_dag(self, task: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def _parse_dag(self, task: str, context: dict[str, Any]) -> dict[str, Any]:
         """解析任务生成依赖图"""
-        prompt = f"""Analyze the following task and break it into independent subtasks that can be executed in parallel where possible.
+        prompt = f"""Analyze the following task.
+Break it into independent subtasks that can be executed in parallel where possible.
 
 Task: {task}
 
 Output a JSON object with:
-- "subtasks": list of subtasks, each with "id", "description", "skill", "parameters", "depends_on" (list of subtask IDs that must complete first)
+- "subtasks": list of subtasks.
+  Each subtask has "id", "description", "skill", "parameters", and "depends_on".
 - "parallel_groups": list of groups of subtask IDs that can run in parallel
 
 Example:
 {{
   "subtasks": [
-    {{"id": "1", "description": "Search arXiv for paper A", "skill": "arxiv_fetcher", "parameters": {{"query": "paper A"}}, "depends_on": []}},
-    {{"id": "2", "description": "Search arXiv for paper B", "skill": "arxiv_fetcher", "parameters": {{"query": "paper B"}}, "depends_on": []}},
+    {{
+      "id": "1",
+      "description": "Search arXiv for paper A",
+      "skill": "arxiv_fetcher",
+      "parameters": {{"query": "paper A"}},
+      "depends_on": []
+    }},
+    {{
+      "id": "2",
+      "description": "Search arXiv for paper B",
+      "skill": "arxiv_fetcher",
+      "parameters": {{"query": "paper B"}},
+      "depends_on": []
+    }},
     {{"id": "3", "description": "Compare results", "skill": null, "parameters": {{}}, "depends_on": ["1", "2"]}}
   ],
   "parallel_groups": [["1", "2"]]
@@ -434,9 +460,7 @@ Example:
         parsed = extract_json_block(response.content)
         return parsed if isinstance(parsed, dict) else {"subtasks": [], "parallel_groups": []}
 
-    async def _execute_dag(
-        self, dag: Dict[str, Any], state: ExecutionState, context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def _execute_dag(self, dag: dict[str, Any], state: ExecutionState, context: dict[str, Any]) -> dict[str, Any]:
         """执行 DAG"""
         subtasks = {t["id"]: t for t in dag.get("subtasks", [])}
         completed = set()
@@ -474,16 +498,18 @@ Example:
                 step_counter += 1
                 step = ExecutionStep(
                     thought=f"Executed subtask {tid}: {subtasks[tid]['description']}",
-                    action={"skill": subtasks[tid].get("skill"), "parameters": subtasks[tid].get("parameters")} if subtasks[tid].get("skill") else None,
-                    observation=self._format_observation(subtasks[tid].get("skill", ""), res) if subtasks[tid].get("skill") else str(res.get("result")),
+                    action={"skill": subtasks[tid].get("skill"), "parameters": subtasks[tid].get("parameters")}
+                    if subtasks[tid].get("skill")
+                    else None,
+                    observation=self._format_observation(subtasks[tid].get("skill", ""), res)
+                    if subtasks[tid].get("skill")
+                    else str(res.get("result")),
                 )
                 state.add_step(step)
 
         return results
 
-    async def _synthesize_dag_results(
-        self, task: str, dag: Dict, results: Dict, context: Dict
-    ) -> str:
+    async def _synthesize_dag_results(self, task: str, dag: dict, results: dict, context: dict) -> str:
         """综合 DAG 结果"""
         prompt = f"""Task: {task}
 
@@ -496,11 +522,11 @@ Please provide a comprehensive final answer."""
 
 
 def create_loop(
-    loop_type: Union[str, LoopType],
+    loop_type: str | LoopType,
     llm: BaseLLM,
-    skill_registry: Optional[SkillRegistry] = None,
-    middleware_manager: Optional[MiddlewareManager] = None,
-    config: Optional[LoopConfig] = None,
+    skill_registry: SkillRegistry | None = None,
+    middleware_manager: MiddlewareManager | None = None,
+    config: LoopConfig | None = None,
 ) -> BaseLoop:
     """工厂函数：根据类型创建执行循环实例"""
     if isinstance(loop_type, str):

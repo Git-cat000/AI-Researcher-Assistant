@@ -2,18 +2,21 @@
 LLM 抽象基类。
 定义了与语言模型交互的统一接口。
 """
+
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, AsyncIterator
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
 class LLMResponse:
     """LLM 响应结构"""
+
     content: str
     model: str
-    usage: Optional[Dict[str, int]] = None  # {"prompt_tokens": 100, "completion_tokens": 50}
-    finish_reason: Optional[str] = None
+    usage: dict[str, int] | None = None  # {"prompt_tokens": 100, "completion_tokens": 50}
+    finish_reason: str | None = None
     raw_response: Any = None
 
 
@@ -27,31 +30,29 @@ class BaseLLM(ABC):
         self.kwargs = kwargs
 
     @abstractmethod
-    def generate(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
+    def generate(self, messages: list[dict[str, str]], **kwargs) -> LLMResponse:
         """
         同步生成回复。
-        
+
         Args:
             messages: 标准格式的消息列表 [{"role": "user", "content": "..."}]
             **kwargs: 额外参数（如 stop, top_p 等）
-            
+
         Returns:
             LLMResponse 对象
         """
         pass
 
     @abstractmethod
-    async def agenerate(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
+    async def agenerate(self, messages: list[dict[str, str]], **kwargs) -> LLMResponse:
         """异步生成回复"""
         pass
 
     @abstractmethod
-    async def stream_generate(
-        self, messages: List[Dict[str, str]], **kwargs
-    ) -> AsyncIterator[str]:
+    async def stream_generate(self, messages: list[dict[str, str]], **kwargs) -> AsyncIterator[str]:
         """
         流式生成回复，逐步产出文本片段。
-        
+
         Yields:
             生成的文本片段
         """

@@ -2,15 +2,17 @@
 状态管理模块。
 定义 Agent 执行过程中的状态结构。
 """
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
-from enum import Enum
-from datetime import datetime
+
 import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any
 
 
 class ExecutionStatus(str, Enum):
     """执行状态枚举"""
+
     IDLE = "idle"
     THINKING = "thinking"
     ACTING = "acting"
@@ -23,14 +25,15 @@ class ExecutionStatus(str, Enum):
 @dataclass
 class ExecutionStep:
     """单步执行记录"""
-    step_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    thought: Optional[str] = None
-    action: Optional[Dict[str, Any]] = None
-    observation: Optional[str] = None
-    timestamp: datetime = field(default_factory=datetime.now)
-    error: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    step_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    thought: str | None = None
+    action: dict[str, Any] | None = None
+    observation: str | None = None
+    timestamp: datetime = field(default_factory=datetime.now)
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "step_id": self.step_id,
             "thought": self.thought,
@@ -47,13 +50,14 @@ class ExecutionState:
     Agent 执行状态。
     包含任务目标、当前步骤、历史记录等。
     """
+
     task: str = ""
     status: ExecutionStatus = ExecutionStatus.IDLE
     current_step: int = 0
     max_steps: int = 20
-    steps: List[ExecutionStep] = field(default_factory=list)
-    final_answer: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    steps: list[ExecutionStep] = field(default_factory=list)
+    final_answer: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def start_task(self, task: str) -> None:
         """开始新任务"""
@@ -78,7 +82,7 @@ class ExecutionState:
         self.status = ExecutionStatus.FAILED
         self.final_answer = f"Task failed: {error}"
 
-    def get_last_step(self) -> Optional[ExecutionStep]:
+    def get_last_step(self) -> ExecutionStep | None:
         """获取最后一步"""
         return self.steps[-1] if self.steps else None
 
@@ -89,7 +93,7 @@ class ExecutionState:
 
         lines = ["Previous steps:"]
         for i, step in enumerate(self.steps):
-            lines.append(f"Step {i+1}:")
+            lines.append(f"Step {i + 1}:")
             if step.thought:
                 lines.append(f"  Thought: {step.thought}")
             if step.action:
@@ -98,7 +102,7 @@ class ExecutionState:
                 lines.append(f"  Observation: {step.observation}")
         return "\n".join(lines)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task": self.task,
             "status": self.status.value,

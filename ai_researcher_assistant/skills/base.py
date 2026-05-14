@@ -2,15 +2,16 @@
 技能抽象基类。
 定义了技能的生命周期和执行接口。
 """
+
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
-import json
+from typing import Any
 
 
 @dataclass
 class SkillParameter:
     """技能参数定义"""
+
     name: str
     description: str
     type: str = "string"
@@ -21,20 +22,21 @@ class SkillParameter:
 @dataclass
 class SkillManifest:
     """技能清单，描述技能的元信息"""
+
     name: str
     description: str
     version: str = "1.0.0"
     author: str = ""
-    parameters: List[SkillParameter] = field(default_factory=list)
-    tags: List[str] = field(default_factory=list)
+    parameters: list[SkillParameter] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
     instructions: str = ""  # 给 LLM 看的详细使用说明
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class BaseSkill(ABC):
     """
     技能抽象基类。
-    
+
     一个技能封装了完成特定任务的完整 SOP（标准操作流程）。
     它包含：
     - 元数据（名称、描述、参数）
@@ -43,7 +45,7 @@ class BaseSkill(ABC):
     """
 
     def __init__(self):
-        self._manifest: Optional[SkillManifest] = None
+        self._manifest: SkillManifest | None = None
 
     @property
     def manifest(self) -> SkillManifest:
@@ -58,14 +60,14 @@ class BaseSkill(ABC):
         pass
 
     @abstractmethod
-    def execute(self, parameters: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute(self, parameters: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         """
         执行技能。
-        
+
         Args:
             parameters: 调用参数
             context: 执行上下文（可包含 LLM 实例、记忆系统等）
-            
+
         Returns:
             执行结果字典，至少包含:
             - success: bool
@@ -74,7 +76,7 @@ class BaseSkill(ABC):
         """
         pass
 
-    async def aexecute(self, parameters: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    async def aexecute(self, parameters: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         """异步执行（默认调用同步方法）"""
         return self.execute(parameters, context)
 
@@ -98,7 +100,7 @@ class BaseSkill(ABC):
             required = "required" if param.required else "optional"
             default = f", default={param.default}" if param.default is not None else ""
             lines.append(f"- `{param.name}` ({param.type}, {required}{default}): {param.description}")
-        
+
         lines.append("")
         lines.append("### How to invoke:")
         lines.append("Output a JSON action in the following format:")
@@ -108,10 +110,10 @@ class BaseSkill(ABC):
         lines.append('  "parameters": {')
         for param in manifest.parameters:
             lines.append(f'    "{param.name}": "<value>"')
-        lines.append('  }')
+        lines.append("  }")
         lines.append("}")
         lines.append("```")
-        
+
         return "\n".join(lines)
 
     def __repr__(self) -> str:

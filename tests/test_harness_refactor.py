@@ -2,12 +2,17 @@
 
 import importlib
 
-from ai_researcher_assistant.harness.parsing import extract_action, extract_final_answer, extract_json_block, extract_thought
+from ai_researcher_assistant.harness.parsing import (
+    extract_action,
+    extract_final_answer,
+    extract_json_block,
+    extract_thought,
+)
 from ai_researcher_assistant.llm import BaseLLM, LLMResponse
 from ai_researcher_assistant.memory import AcademicRAG
 from ai_researcher_assistant.orchestration import ResearcherAgent
 from ai_researcher_assistant.skills import SkillRegistry
-from ai_researcher_assistant.skills.buildin.paper_writer import PaperWriterSkill
+from ai_researcher_assistant.skills.builtin.paper_writer import PaperWriterSkill
 from ai_researcher_assistant.skills.loader import SkillLoader
 
 
@@ -156,7 +161,10 @@ Action:
 ```json
 {"skill": "literature-review", "parameters": {"topic": "RAG"}}
 ```""",
-            "Thought: I now have enough information to answer the question.\nFinal Answer: Markdown skill flow completed.",
+            (
+                "Thought: I now have enough information to answer the question.\n"
+                "Final Answer: Markdown skill flow completed."
+            ),
         ]
     )
     agent = ResearcherAgent(

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from math import sqrt
-import re
 from typing import Any
 
 from ai_researcher_assistant.memory.base import BaseEmbedding, BaseMemory, MemoryItem
@@ -62,7 +62,9 @@ class InMemoryVectorMemory(BaseMemory):
             if where and not metadata_matches(item.metadata, where):
                 continue
             score = cosine_similarity(query_embedding, item.embedding or [])
-            clone = MemoryItem(id=item.id, content=item.content, metadata=dict(item.metadata), created_at=item.created_at)
+            clone = MemoryItem(
+                id=item.id, content=item.content, metadata=dict(item.metadata), created_at=item.created_at
+            )
             clone.embedding = item.embedding
             clone.metadata["_distance"] = 1.0 - score
             scored.append((score, clone))
@@ -83,7 +85,13 @@ class InMemoryVectorMemory(BaseMemory):
         if limit is not None:
             items = items[:limit]
         return [
-            MemoryItem(id=item.id, content=item.content, metadata=dict(item.metadata), created_at=item.created_at, embedding=item.embedding)
+            MemoryItem(
+                id=item.id,
+                content=item.content,
+                metadata=dict(item.metadata),
+                created_at=item.created_at,
+                embedding=item.embedding,
+            )
             for item in items
         ]
 

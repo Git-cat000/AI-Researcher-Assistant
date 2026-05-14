@@ -5,8 +5,8 @@ OpenAI, DeepSeek, OpenRouter, SiliconFlow, local gateways, and compatible
 enterprise endpoints through `base_url`.
 """
 
-from collections.abc import AsyncIterator
 import os
+from collections.abc import AsyncIterator
 from typing import Any
 
 from ai_researcher_assistant.core.exceptions import LLMError

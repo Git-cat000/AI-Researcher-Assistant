@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
 import logging
 import re
+from typing import Any
 
 from ai_researcher_assistant.core.config import get_config
-from ai_researcher_assistant.core.exceptions import MemoryError
 from ai_researcher_assistant.memory.base import BaseEmbedding, BaseMemory, MemoryItem
 from ai_researcher_assistant.memory.in_memory import HashEmbedding, InMemoryVectorMemory
 
@@ -29,7 +28,9 @@ class AcademicRAG:
     ):
         config = get_config()
         self.chunk_size = chunk_size or config.memory.chunk_size
-        self.chunk_overlap = min(chunk_overlap if chunk_overlap is not None else config.memory.chunk_overlap, self.chunk_size - 1)
+        self.chunk_overlap = min(
+            chunk_overlap if chunk_overlap is not None else config.memory.chunk_overlap, self.chunk_size - 1
+        )
         self.memory = memory or self._create_memory(
             collection_name=collection_name,
             persist_directory=persist_directory,
@@ -106,7 +107,11 @@ class AcademicRAG:
             if categories and not set(categories).intersection(set(item.metadata.get("categories", []))):
                 continue
 
-            paper_key = item.metadata.get("paper_key") or item.metadata.get("arxiv_id") or normalize_paper_key(item.metadata.get("title", ""))
+            paper_key = (
+                item.metadata.get("paper_key")
+                or item.metadata.get("arxiv_id")
+                or normalize_paper_key(item.metadata.get("title", ""))
+            )
             paper = papers.setdefault(
                 paper_key,
                 {
@@ -165,7 +170,11 @@ class AcademicRAG:
 
         if not arxiv_id and not title:
             return 0
-        where = {"type": "paper", "arxiv_id": arxiv_id} if arxiv_id else {"type": "paper", "paper_key": normalize_paper_key(title or "")}
+        where = (
+            {"type": "paper", "arxiv_id": arxiv_id}
+            if arxiv_id
+            else {"type": "paper", "paper_key": normalize_paper_key(title or "")}
+        )
         if hasattr(self.memory, "delete_many"):
             return self.memory.delete_many(where)  # type: ignore[attr-defined]
         deleted = 0
@@ -179,7 +188,11 @@ class AcademicRAG:
 
         keys = set()
         for item in self._list_items(where={"type": "paper"}):
-            keys.add(item.metadata.get("paper_key") or item.metadata.get("arxiv_id") or normalize_paper_key(item.metadata.get("title", "")))
+            keys.add(
+                item.metadata.get("paper_key")
+                or item.metadata.get("arxiv_id")
+                or normalize_paper_key(item.metadata.get("title", ""))
+            )
         return len(keys)
 
     def _chunk_text(self, text: str) -> list[str]:

@@ -1,84 +1,137 @@
-"""
-消息类型定义。
-用于 Agent 内部各模块间通信，以及 LLM 对话历史管理。
-"""
-from dataclasses import dataclass, field
-from typing import Literal, Optional, Any, Dict, List
-from enum import Enum
-from datetime import datetime
+"""Message types and conversation window management."""
+
 import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any
 
 
 class MessageRole(str, Enum):
-    """消息角色"""
+    """Roles used inside the agent conversation."""
+
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
-    TOOL = "tool"           # 工具执行结果
-    SKILL = "skill"         # 技能调用
-    OBSERVATION = "observation"  # 环境观察（ReAct 循环）
+    TOOL = "tool"
+    SKILL = "skill"
+    OBSERVATION = "observation"
 
 
 @dataclass
 class Message:
-    """基础消息类"""
+    """A single conversation message."""
+
     role: MessageRole
     content: str
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: datetime = field(default_factory=datetime.now)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典，便于序列化和 LLM API 调用"""
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a serializable dictionary."""
+
         return {
+            "id": self.id,
             "role": self.role.value,
             "content": self.content,
-            # 可选添加 metadata（某些 LLM API 可能不支持）
+            "timestamp": self.timestamp.isoformat(),
+            "metadata": self.metadata,
         }
 
-    def to_llm_format(self) -> Dict[str, str]:
-        """转换为标准的 LLM 消息格式"""
-        # 将 TOOL/SKILL/OBSERVATION 映射为 user 或 assistant，取决于上下文
+    def to_llm_format(self) -> dict[str, str]:
+        """Convert to the common chat-completions message format."""
+
         if self.role == MessageRole.TOOL:
-            return {"role": "user", "content": f"[工具结果] {self.content}"}
-        elif self.role == MessageRole.SKILL:
-            return {"role": "user", "content": f"[技能输出] {self.content}"}
-        elif self.role == MessageRole.OBSERVATION:
-            return {"role": "user", "content": f"[观察] {self.content}"}
-        else:
-            return {"role": self.role.value, "content": self.content}
+            return {"role": "user", "content": f"[Tool result] {self.content}"}
+        if self.role == MessageRole.SKILL:
+            return {"role": "user", "content": f"[Skill output] {self.content}"}
+        if self.role == MessageRole.OBSERVATION:
+            return {"role": "user", "content": f"[Observation] {self.content}"}
+        return {"role": self.role.value, "content": self.content}
 
 
 @dataclass
 class Conversation:
-    """对话历史管理器"""
-    messages: List[Message] = field(default_factory=list)
-    system_prompt: Optional[str] = None
+    """Conversation history with a simple token-budgeted context window."""
 
-    def add(self, role: MessageRole, content: str, **metadata):
-        """添加一条消息"""
+    messages: list[Message] = field(default_factory=list)
+    system_prompt: str | None = None
+
+    def add(self, role: MessageRole, content: str, **metadata: Any) -> Message:
+        """Append a message to the conversation."""
+
         msg = Message(role=role, content=content, metadata=metadata)
         self.messages.append(msg)
         return msg
 
-    def add_system(self, content: str):
-        """设置或更新系统提示"""
+    def add_system(self, content: str) -> None:
+        """Set or replace the system prompt."""
+
         self.system_prompt = content
 
-    def get_context_window(self, max_tokens: Optional[int] = None) -> List[Dict[str, str]]:
-        """获取用于 LLM 调用的消息列表"""
-        result = []
-        if self.system_prompt:
-            result.append({"role": "system", "content": self.system_prompt})
-        for msg in self.messages:
-            result.append(msg.to_llm_format())
-        # TODO: 实现 token 截断逻辑
-        return result
+    def get_context_window(self, max_tokens: int | None = None) -> list[dict[str, str]]:
+        """Return messages for an LLM call, keeping the newest history within budget."""
 
-    def clear(self):
-        """清空历史（保留系统提示）"""
+        if max_tokens is None:
+            result = []
+            if self.system_prompt:
+                result.append({"role": "system", "content": self.system_prompt})
+            result.extend(msg.to_llm_format() for msg in self.messages)
+            return result
+
+        system_message = {"role": "system", "content": self.system_prompt} if self.system_prompt else None
+        system_tokens = estimate_tokens(self.system_prompt or "") if system_message else 0
+        budget = max(0, max_tokens - system_tokens)
+
+        selected: list[dict[str, str]] = []
+        used_tokens = 0
+        for msg in reversed(self.messages):
+            formatted = msg.to_llm_format()
+            tokens = estimate_tokens(formatted["content"])
+            if selected and used_tokens + tokens > budget:
+                break
+            if not selected and tokens > budget:
+                formatted = {
+                    "role": formatted["role"],
+                    "content": truncate_to_token_budget(formatted["content"], budget),
+                }
+                tokens = estimate_tokens(formatted["content"])
+            selected.insert(0, formatted)
+            used_tokens += tokens
+
+        if system_message:
+            return [system_message, *selected]
+        return selected
+
+    def clear(self) -> None:
+        """Clear conversation history while preserving the system prompt."""
+
         self.messages.clear()
 
-    def last(self) -> Optional[Message]:
-        """获取最后一条消息"""
+    def last(self) -> Message | None:
+        """Return the most recent message."""
+
         return self.messages[-1] if self.messages else None
+
+
+def estimate_tokens(text: str) -> int:
+    """Estimate tokens without provider-specific tokenizers."""
+
+    if not text:
+        return 0
+    cjk_chars = sum(1 for char in text if "\u4e00" <= char <= "\u9fff")
+    other_chars = len(text) - cjk_chars
+    return max(1, cjk_chars + other_chars // 4)
+
+
+def truncate_to_token_budget(text: str, max_tokens: int) -> str:
+    """Truncate text to a rough token budget while preserving a useful suffix."""
+
+    if max_tokens <= 0:
+        return ""
+    if estimate_tokens(text) <= max_tokens:
+        return text
+    approximate_chars = max_tokens * 4
+    suffix = text[-approximate_chars:]
+    return f"[truncated]\n{suffix}"

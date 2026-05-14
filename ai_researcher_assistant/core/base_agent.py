@@ -2,23 +2,25 @@
 Agent 基类。
 所有具体 Agent 实现都应继承此类。
 """
+
 from abc import ABC, abstractmethod
-from typing import Optional, Any, Dict, List, AsyncIterator
-from ai_researcher_assistant.core.message import Conversation, MessageRole
+from collections.abc import AsyncIterator
+
 from ai_researcher_assistant.core.config import AgentConfig, get_config
+from ai_researcher_assistant.core.message import Conversation
 
 
 class BaseAgent(ABC):
     """
     Agent 抽象基类。
-    
+
     定义了 Agent 的基本生命周期：
     1. 初始化配置
     2. 处理消息（同步/异步/流式）
     3. 管理对话历史
     """
 
-    def __init__(self, config: Optional[AgentConfig] = None, name: str = "Agent"):
+    def __init__(self, config: AgentConfig | None = None, name: str = "Agent"):
         self.config = config or get_config()
         self.name = name
         self.conversation = Conversation()
@@ -36,10 +38,10 @@ class BaseAgent(ABC):
     def process(self, user_input: str) -> str:
         """
         同步处理用户输入，返回最终回复。
-        
+
         Args:
             user_input: 用户输入的文本
-            
+
         Returns:
             Agent 的最终回复
         """
@@ -54,10 +56,10 @@ class BaseAgent(ABC):
     async def stream_process(self, user_input: str) -> AsyncIterator[str]:
         """
         流式处理用户输入，逐步返回生成的内容。
-        
+
         Args:
             user_input: 用户输入
-            
+
         Yields:
             逐步生成的文本片段
         """

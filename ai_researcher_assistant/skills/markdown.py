@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Any
 
 from ai_researcher_assistant.skills.base import BaseSkill, SkillManifest
@@ -33,7 +33,11 @@ class MarkdownSkill(BaseSkill):
             parameters=[],
             tags=list(tags) if isinstance(tags, list) else [],
             instructions=self.body.strip(),
-            metadata={k: v for k, v in self.frontmatter.items() if k not in {"name", "description", "version", "author", "tags"}},
+            metadata={
+                k: v
+                for k, v in self.frontmatter.items()
+                if k not in {"name", "description", "version", "author", "tags"}
+            },
         )
 
     def execute(self, parameters: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:

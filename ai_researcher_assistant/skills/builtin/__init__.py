@@ -1,0 +1,24 @@
+"""Compatibility package for built-in skills."""
+
+
+def __getattr__(name: str):
+    if name == "ArxivFetcherSkill":
+        from ai_researcher_assistant.skills.buildin.arxiv_fetcher import ArxivFetcherSkill
+
+        return ArxivFetcherSkill
+    if name == "PaperReaderSkill":
+        from ai_researcher_assistant.skills.buildin.paper_reader import PaperReaderSkill
+
+        return PaperReaderSkill
+    if name == "PaperWriterSkill":
+        from ai_researcher_assistant.skills.buildin.paper_writer import PaperWriterSkill
+
+        return PaperWriterSkill
+    raise AttributeError(name)
+
+
+__all__ = [
+    "ArxivFetcherSkill",
+    "PaperReaderSkill",
+    "PaperWriterSkill",
+]

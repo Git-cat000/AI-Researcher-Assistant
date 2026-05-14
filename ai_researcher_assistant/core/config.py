@@ -4,8 +4,8 @@ Configuration is explicit and lazy. Importing this module does not read `.env`
 files, create directories, or open external resources.
 """
 
-from dataclasses import dataclass, field
 import os
+from dataclasses import dataclass, field
 from typing import Literal
 
 from dotenv import load_dotenv
@@ -76,7 +76,9 @@ class SkillsConfig:
 
     skills_dir: str = "./skills"
     enable_builtin: bool = True
-    arxiv_categories: list[str] = field(default_factory=lambda: ["hep-th", "hep-ph", "quant-ph", "gr-qc", "astro-ph.CO"])
+    arxiv_categories: list[str] = field(
+        default_factory=lambda: ["hep-th", "hep-ph", "quant-ph", "gr-qc", "astro-ph.CO"]
+    )
     arxiv_max_results: int = 50
 
 

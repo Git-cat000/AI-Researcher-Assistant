@@ -1,7 +1,7 @@
 """Anthropic Claude adapter."""
 
-from collections.abc import AsyncIterator
 import os
+from collections.abc import AsyncIterator
 from typing import Any
 
 from ai_researcher_assistant.core.exceptions import LLMError

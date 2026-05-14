@@ -71,7 +71,8 @@ final answer.
 
         prompts = {
             "polish": f"""You are an expert academic editor in the field of {field}.
-Polish the following text to improve clarity, grammar, and academic tone while preserving the original meaning and technical accuracy.
+Polish the following text to improve clarity, grammar, and academic tone.
+Preserve the original meaning and technical accuracy.
 Use a {style} style. Do not add new content or change the scientific claims.
 
 Text to polish:
@@ -101,7 +102,8 @@ Idea:
 
 Expanded paragraph:""",
             "latex_format": f"""You are an expert in LaTeX typesetting for {field} papers.
-Convert the following text into proper LaTeX format. Ensure mathematical expressions, citations, and sections are formatted appropriately.
+Convert the following text into proper LaTeX format.
+Ensure mathematical expressions, citations, and sections are formatted appropriately.
 
 Text:
 ---
@@ -110,7 +112,8 @@ Text:
 
 LaTeX output:""",
             "generate_abstract": f"""You are writing an abstract for a research paper in {field}.
-Based on the following content, write a concise abstract of 150-250 words summarizing the problem, methods, key results, and implications.
+Based on the following content, write a concise abstract of 150-250 words.
+Summarize the problem, methods, key results, and implications.
 Use a {style} academic style.
 
 Content:

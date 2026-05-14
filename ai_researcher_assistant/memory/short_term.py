@@ -2,11 +2,12 @@
 短期记忆：会话上下文管理。
 使用滑动窗口控制 Token 数量，防止上下文溢出。
 """
-from typing import List, Dict, Any, Optional
-from collections import deque
 
-from ai_researcher_assistant.memory.base import BaseMemory, MemoryItem
+from collections import deque
+from typing import Any
+
 from ai_researcher_assistant.core.message import Message, MessageRole
+from ai_researcher_assistant.memory.base import BaseMemory, MemoryItem
 
 
 class ShortTermMemory(BaseMemory):
@@ -27,7 +28,7 @@ class ShortTermMemory(BaseMemory):
         self._token_count += self._estimate_tokens(message.content)
         self._trim()
 
-    def add(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+    def add(self, content: str, metadata: dict[str, Any] | None = None) -> str:
         """
         添加一条记忆（兼容 BaseMemory 接口）。
         默认视为 user 消息。
@@ -39,7 +40,7 @@ class ShortTermMemory(BaseMemory):
         self.add_message(msg)
         return msg.id
 
-    def get(self, memory_id: str) -> Optional[MemoryItem]:
+    def get(self, memory_id: str) -> MemoryItem | None:
         for msg in self._messages:
             if msg.id == memory_id:
                 return MemoryItem(
@@ -50,7 +51,7 @@ class ShortTermMemory(BaseMemory):
                 )
         return None
 
-    def search(self, query: str, top_k: int = 5, **kwargs) -> List[MemoryItem]:
+    def search(self, query: str, top_k: int = 5, **kwargs) -> list[MemoryItem]:
         """
         短期记忆不支持语义搜索，返回最近的 top_k 条。
         """
@@ -80,11 +81,11 @@ class ShortTermMemory(BaseMemory):
     def count(self) -> int:
         return len(self._messages)
 
-    def get_messages(self) -> List[Message]:
+    def get_messages(self) -> list[Message]:
         """获取所有消息（用于 LLM 上下文）"""
         return list(self._messages)
 
-    def get_context_for_llm(self, max_tokens: Optional[int] = None) -> List[Dict[str, str]]:
+    def get_context_for_llm(self, max_tokens: int | None = None) -> list[dict[str, str]]:
         """
         获取格式化的上下文，用于 LLM API 调用。
         """

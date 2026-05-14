@@ -1,12 +1,14 @@
 """本地模型适配器（Ollama）"""
-import os
+
 import json
-from typing import List, Dict, Any, Optional, AsyncIterator
+import os
+from collections.abc import AsyncIterator
+
 import aiohttp
 import requests
 
-from ai_researcher_assistant.llm.base import BaseLLM, LLMResponse
 from ai_researcher_assistant.core.exceptions import LLMError
+from ai_researcher_assistant.llm.base import BaseLLM, LLMResponse
 
 
 class OllamaLLM(BaseLLM):
@@ -15,17 +17,17 @@ class OllamaLLM(BaseLLM):
     def __init__(
         self,
         model: str = "llama3",
-        base_url: Optional[str] = None,
+        base_url: str | None = None,
         temperature: float = 0.0,
         max_tokens: int = 4096,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(model, temperature, max_tokens, **kwargs)
-        
+
         self.base_url = (base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
         self.generate_url = f"{self.base_url}/api/chat"
 
-    def generate(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
+    def generate(self, messages: list[dict[str, str]], **kwargs) -> LLMResponse:
         try:
             payload = {
                 "model": self.model,
@@ -34,13 +36,13 @@ class OllamaLLM(BaseLLM):
                 "options": {
                     "temperature": kwargs.get("temperature", self.temperature),
                     "num_predict": kwargs.get("max_tokens", self.max_tokens),
-                }
+                },
             }
-            
+
             response = requests.post(self.generate_url, json=payload, timeout=120)
             response.raise_for_status()
             data = response.json()
-            
+
             return LLMResponse(
                 content=data.get("message", {}).get("content", ""),
                 model=data.get("model", self.model),
@@ -55,7 +57,7 @@ class OllamaLLM(BaseLLM):
         except Exception as e:
             raise LLMError(f"Ollama API error: {str(e)}") from e
 
-    async def agenerate(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
+    async def agenerate(self, messages: list[dict[str, str]], **kwargs) -> LLMResponse:
         try:
             payload = {
                 "model": self.model,
@@ -64,14 +66,14 @@ class OllamaLLM(BaseLLM):
                 "options": {
                     "temperature": kwargs.get("temperature", self.temperature),
                     "num_predict": kwargs.get("max_tokens", self.max_tokens),
-                }
+                },
             }
-            
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(self.generate_url, json=payload, timeout=120) as resp:
                     resp.raise_for_status()
                     data = await resp.json()
-            
+
             return LLMResponse(
                 content=data.get("message", {}).get("content", ""),
                 model=data.get("model", self.model),
@@ -86,9 +88,7 @@ class OllamaLLM(BaseLLM):
         except Exception as e:
             raise LLMError(f"Ollama async API error: {str(e)}") from e
 
-    async def stream_generate(
-        self, messages: List[Dict[str, str]], **kwargs
-    ) -> AsyncIterator[str]:
+    async def stream_generate(self, messages: list[dict[str, str]], **kwargs) -> AsyncIterator[str]:
         try:
             payload = {
                 "model": self.model,
@@ -97,9 +97,9 @@ class OllamaLLM(BaseLLM):
                 "options": {
                     "temperature": kwargs.get("temperature", self.temperature),
                     "num_predict": kwargs.get("max_tokens", self.max_tokens),
-                }
+                },
             }
-            
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(self.generate_url, json=payload, timeout=120) as resp:
                     resp.raise_for_status()

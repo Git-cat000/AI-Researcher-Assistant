@@ -1,8 +1,8 @@
 """ResearcherAgent facade for the LLM harness."""
 
-from collections.abc import AsyncIterator, Callable
 import asyncio
 import logging
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from ai_researcher_assistant.core.base_agent import BaseAgent

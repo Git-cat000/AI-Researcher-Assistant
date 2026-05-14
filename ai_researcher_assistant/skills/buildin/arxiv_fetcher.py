@@ -2,9 +2,11 @@
 arXiv 论文抓取技能。
 支持按分类、关键词、日期范围检索 arXiv 论文。
 """
-import arxiv
-from typing import Dict, Any, List
+
 from datetime import datetime, timedelta
+from typing import Any
+
+import arxiv
 
 from ai_researcher_assistant.skills.base import BaseSkill, SkillManifest, SkillParameter
 
@@ -57,14 +59,14 @@ class ArxivFetcherSkill(BaseSkill):
             ],
             tags=["academic", "paper", "arxiv", "research"],
             instructions="""
-Use this skill to search for academic papers on arXiv. 
+Use this skill to search for academic papers on arXiv.
 You can filter by physics categories like hep-th, quant-ph, gr-qc, etc.
 The results include paper title, authors, abstract, arXiv ID, and PDF URL.
 This skill is read-only and does not modify any data.
             """,
         )
 
-    def execute(self, parameters: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute(self, parameters: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         query = parameters.get("query", "")
         categories = parameters.get("categories", ["hep-th", "hep-ph", "quant-ph", "gr-qc", "astro-ph.CO"])
         max_results = parameters.get("max_results", 10)
@@ -110,17 +112,19 @@ This skill is read-only and does not modify any data.
 
             papers = []
             for result in client.results(search):
-                papers.append({
-                    "title": result.title,
-                    "authors": [author.name for author in result.authors],
-                    "abstract": result.summary,
-                    "arxiv_id": result.entry_id.split("/")[-1],
-                    "pdf_url": result.pdf_url,
-                    "published": result.published.isoformat(),
-                    "updated": result.updated.isoformat(),
-                    "categories": result.categories,
-                    "comment": result.comment or "",
-                })
+                papers.append(
+                    {
+                        "title": result.title,
+                        "authors": [author.name for author in result.authors],
+                        "abstract": result.summary,
+                        "arxiv_id": result.entry_id.split("/")[-1],
+                        "pdf_url": result.pdf_url,
+                        "published": result.published.isoformat(),
+                        "updated": result.updated.isoformat(),
+                        "categories": result.categories,
+                        "comment": result.comment or "",
+                    }
+                )
 
             return {
                 "success": True,

@@ -2,26 +2,25 @@
 基于图的编排模块。
 提供类似 LangGraph 的状态图编排能力。
 """
-from typing import (
-    Dict, Any, Optional, List, Callable, Awaitable, Union,
-    Set, Tuple
-)
-from dataclasses import dataclass, field
-from enum import Enum
-import asyncio
+
 import json
 import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
 
-from ai_researcher_assistant.llm import BaseLLM
-from ai_researcher_assistant.skills.registry import SkillRegistry
-from ai_researcher_assistant.orchestration.state import ExecutionState, ExecutionStep
 from ai_researcher_assistant.core.message import Conversation, MessageRole
+from ai_researcher_assistant.llm import BaseLLM
+from ai_researcher_assistant.orchestration.state import ExecutionState, ExecutionStep
+from ai_researcher_assistant.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
 
 
 class GraphState(dict):
     """图状态字典，在节点间传递"""
+
     pass
 
 
@@ -31,6 +30,7 @@ ConditionalFunc = Callable[[GraphState], str]
 
 class NodeType(str, Enum):
     """节点类型"""
+
     LLM = "llm"
     SKILL = "skill"
     FUNCTION = "function"
@@ -42,19 +42,21 @@ class NodeType(str, Enum):
 @dataclass
 class Node:
     """图节点"""
+
     name: str
     func: NodeFunc
     node_type: NodeType = NodeType.FUNCTION
     description: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class Edge:
     """图边"""
+
     source: str
     target: str
-    condition: Optional[ConditionalFunc] = None
+    condition: ConditionalFunc | None = None
     label: str = ""
 
 
@@ -63,19 +65,14 @@ class StateGraph:
 
     def __init__(self, name: str = "AgentGraph"):
         self.name = name
-        self.nodes: Dict[str, Node] = {}
-        self.edges: List[Edge] = []
-        self.conditional_edges: Dict[str, List[Edge]] = {}
-        self.entry_point: Optional[str] = None
-        self.finish_points: Set[str] = set()
+        self.nodes: dict[str, Node] = {}
+        self.edges: list[Edge] = []
+        self.conditional_edges: dict[str, list[Edge]] = {}
+        self.entry_point: str | None = None
+        self.finish_points: set[str] = set()
 
     def add_node(
-        self,
-        name: str,
-        func: NodeFunc,
-        node_type: NodeType = NodeType.FUNCTION,
-        description: str = "",
-        **metadata
+        self, name: str, func: NodeFunc, node_type: NodeType = NodeType.FUNCTION, description: str = "", **metadata
     ) -> "StateGraph":
         self.nodes[name] = Node(
             name=name,
@@ -86,13 +83,7 @@ class StateGraph:
         )
         return self
 
-    def add_llm_node(
-        self,
-        name: str,
-        llm: BaseLLM,
-        prompt_template: str,
-        **metadata
-    ) -> "StateGraph":
+    def add_llm_node(self, name: str, llm: BaseLLM, prompt_template: str, **metadata) -> "StateGraph":
         async def llm_node(state: GraphState) -> GraphState:
             prompt = prompt_template.format(**state)
             messages = [{"role": "user", "content": prompt}]
@@ -106,9 +97,9 @@ class StateGraph:
         self,
         name: str,
         skill_name: str,
-        skill_registry: Optional[SkillRegistry] = None,
-        param_mapping: Optional[Callable[[GraphState], Dict[str, Any]]] = None,
-        **metadata
+        skill_registry: SkillRegistry | None = None,
+        param_mapping: Callable[[GraphState], dict[str, Any]] | None = None,
+        **metadata,
     ) -> "StateGraph":
         registry = skill_registry or SkillRegistry()
 
@@ -146,11 +137,7 @@ class StateGraph:
         return self
 
     def add_conditional_edges(
-        self,
-        source: str,
-        condition: ConditionalFunc,
-        targets: Dict[str, str],
-        label: str = ""
+        self, source: str, condition: ConditionalFunc, targets: dict[str, str], label: str = ""
     ) -> "StateGraph":
         if source not in self.nodes:
             raise ValueError(f"Source node '{source}' not found")
@@ -158,8 +145,7 @@ class StateGraph:
             if t not in self.nodes:
                 raise ValueError(f"Target node '{t}' not found")
         self.conditional_edges[source] = [
-            Edge(source=source, target=targets[k], condition=condition, label=f"{label}:{k}")
-            for k in targets
+            Edge(source=source, target=targets[k], condition=condition, label=f"{label}:{k}") for k in targets
         ]
         return self
 
@@ -182,11 +168,11 @@ class CompiledGraph:
     def __init__(
         self,
         name: str,
-        nodes: Dict[str, Node],
-        edges: List[Edge],
-        conditional_edges: Dict[str, List[Edge]],
+        nodes: dict[str, Node],
+        edges: list[Edge],
+        conditional_edges: dict[str, list[Edge]],
         entry_point: str,
-        finish_points: Set[str],
+        finish_points: set[str],
     ):
         self.name = name
         self.nodes = nodes
@@ -198,7 +184,7 @@ class CompiledGraph:
         self._build_adjacency()
 
     def _build_adjacency(self):
-        self.adjacency: Dict[str, List[Edge]] = {name: [] for name in self.nodes}
+        self.adjacency: dict[str, list[Edge]] = {name: [] for name in self.nodes}
         for edge in self.edges:
             self.adjacency[edge.source].append(edge)
         for source, edges in self.conditional_edges.items():
@@ -260,7 +246,7 @@ class CompiledGraph:
 
         return state
 
-    async def _get_next_node(self, current: str, state: GraphState) -> Optional[str]:
+    async def _get_next_node(self, current: str, state: GraphState) -> str | None:
         edges = self.adjacency.get(current, [])
 
         for edge in edges:
@@ -278,7 +264,7 @@ class CompiledGraph:
 class AgentGraphBuilder:
     """针对 ResearcherAgent 的图构建器"""
 
-    def __init__(self, llm: BaseLLM, skill_registry: Optional[SkillRegistry] = None):
+    def __init__(self, llm: BaseLLM, skill_registry: SkillRegistry | None = None):
         self.llm = llm
         self.skill_registry = skill_registry or SkillRegistry()
 
@@ -297,6 +283,7 @@ class AgentGraphBuilder:
             state["llm_response"] = response.content
 
             import re
+
             text = response.content
             thought_match = re.search(r"Thought:\s*(.+?)(?=Action:|$)", text, re.DOTALL)
             state["thought"] = thought_match.group(1).strip() if thought_match else text
@@ -304,6 +291,7 @@ class AgentGraphBuilder:
             action_match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
             if action_match:
                 import json
+
                 try:
                     state["action"] = json.loads(action_match.group(1))
                 except (json.JSONDecodeError, TypeError):
