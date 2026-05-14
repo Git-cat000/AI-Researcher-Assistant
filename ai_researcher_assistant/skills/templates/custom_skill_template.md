@@ -1,19 +1,88 @@
-# Custom Skill: [Skill Name]
+---
+name: custom-skill-name
+description: Describe what this skill does and when an agent should use it.
+---
 
-## Metadata
-- Name: custom_skill_name
-- Version: 1.0.0
-- Description: Brief description of what this skill does.
-- Author: Your Name
+# Custom Skill Template
+
+Use this template to document a custom skill before or alongside its Python implementation.
+
+## When To Use
+
+Describe the tasks where the agent should choose this skill.
+
+Example:
+
+> Use this skill when the user asks to search a local bibliography by keyword, author, or paper title.
 
 ## Parameters
-- param1 (string, required): Description of parameter 1.
-- param2 (integer, optional, default=10): Description of parameter 2.
 
-## Instructions for LLM
-Explain to the LLM when and how to use this skill. 
-Describe the expected input, output, and any constraints.
+| Name | Type | Required | Default | Description |
+|---|---|---:|---|---|
+| `query` | string | yes | | Search query or task input. |
+| `top_k` | integer | no | `5` | Maximum number of results to return. |
 
-## Implementation
-To implement this skill in Python, create a class that inherits from `BaseSkill`.
-See `ai_researcher_assistant/skills/builtin/` for examples.
+## Output
+
+Skills should return a structured result:
+
+```python
+{"success": True, "result": {...}, "error": None}
+{"success": False, "result": None, "error": "Describe the failure"}
+```
+
+## Constraints
+
+- Do not call an LLM from inside the skill.
+- Do not mutate global state.
+- Do not read secrets from files directly; use configuration passed by the harness.
+- Keep network and filesystem behavior explicit and testable.
+
+## Python Skeleton
+
+```python
+from ai_researcher_assistant.skills import BaseSkill, SkillManifest, SkillParameter
+
+
+class CustomSkill(BaseSkill):
+    def _build_manifest(self) -> SkillManifest:
+        return SkillManifest(
+            name="custom_skill_name",
+            description="One short sentence describing the skill.",
+            parameters=[
+                SkillParameter(
+                    name="query",
+                    type="string",
+                    required=True,
+                    description="Search query or task input.",
+                ),
+                SkillParameter(
+                    name="top_k",
+                    type="integer",
+                    required=False,
+                    default=5,
+                    description="Maximum number of results to return.",
+                ),
+            ],
+        )
+
+    def execute(self, parameters, context):
+        query = parameters["query"]
+        top_k = parameters.get("top_k", 5)
+
+        return {
+            "success": True,
+            "result": {"query": query, "top_k": top_k, "items": []},
+            "error": None,
+        }
+```
+
+## Implementation Location
+
+Built-in examples currently live in:
+
+```text
+ai_researcher_assistant/skills/buildin/
+```
+
+The directory name is currently `buildin`, not `builtin`.

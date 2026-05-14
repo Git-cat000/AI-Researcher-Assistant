@@ -9,10 +9,11 @@ from typing import (
 from dataclasses import dataclass, field
 from enum import Enum
 import asyncio
+import json
 import logging
 
 from ai_researcher_assistant.llm import BaseLLM
-from ai_researcher_assistant.skills.registry import SkillRegistry, get_skill_registry
+from ai_researcher_assistant.skills.registry import SkillRegistry
 from ai_researcher_assistant.orchestration.state import ExecutionState, ExecutionStep
 from ai_researcher_assistant.core.message import Conversation, MessageRole
 
@@ -109,7 +110,7 @@ class StateGraph:
         param_mapping: Optional[Callable[[GraphState], Dict[str, Any]]] = None,
         **metadata
     ) -> "StateGraph":
-        registry = skill_registry or get_skill_registry()
+        registry = skill_registry or SkillRegistry()
 
         async def skill_node(state: GraphState) -> GraphState:
             if param_mapping:
@@ -279,7 +280,7 @@ class AgentGraphBuilder:
 
     def __init__(self, llm: BaseLLM, skill_registry: Optional[SkillRegistry] = None):
         self.llm = llm
-        self.skill_registry = skill_registry or get_skill_registry()
+        self.skill_registry = skill_registry or SkillRegistry()
 
     def build_react_graph(self) -> StateGraph:
         graph = StateGraph("ReActGraph")
@@ -305,7 +306,7 @@ class AgentGraphBuilder:
                 import json
                 try:
                     state["action"] = json.loads(action_match.group(1))
-                except:
+                except (json.JSONDecodeError, TypeError):
                     state["action"] = None
             else:
                 state["action"] = None

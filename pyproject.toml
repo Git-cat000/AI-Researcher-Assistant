@@ -36,8 +36,13 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-cov>=5.0.0",
+    "pytest-mock>=3.0.0",
     "black>=24.0.0",
     "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+    "types-requests",
 ]
 
 [project.urls]
@@ -56,3 +61,7 @@ target-version = ["py310", "py311", "py312"]
 [tool.ruff]
 line-length = 120
 select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

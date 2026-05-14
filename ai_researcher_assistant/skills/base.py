@@ -28,6 +28,7 @@ class SkillManifest:
     parameters: List[SkillParameter] = field(default_factory=list)
     tags: List[str] = field(default_factory=list)
     instructions: str = ""  # 给 LLM 看的详细使用说明
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class BaseSkill(ABC):

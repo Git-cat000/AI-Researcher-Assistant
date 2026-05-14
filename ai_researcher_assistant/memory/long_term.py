@@ -4,9 +4,6 @@
 import os
 import json
 from typing import List, Dict, Any, Optional
-import chromadb
-from chromadb.config import Settings
-
 from ai_researcher_assistant.memory.base import BaseMemory, MemoryItem, BaseEmbedding
 from ai_researcher_assistant.core.config import get_config
 from ai_researcher_assistant.core.exceptions import MemoryError
@@ -47,6 +44,12 @@ class LongTermMemory(BaseMemory):
         # 确保目录存在
         os.makedirs(self.persist_directory, exist_ok=True)
         
+        try:
+            import chromadb
+            from chromadb.config import Settings
+        except ImportError as exc:
+            raise MemoryError("ChromaDB is not installed. Run `pip install chromadb`.") from exc
+
         self.client = chromadb.PersistentClient(
             path=self.persist_directory,
             settings=Settings(anonymized_telemetry=False),
@@ -156,8 +159,26 @@ class LongTermMemory(BaseMemory):
         try:
             self.collection.delete(ids=[memory_id])
             return True
-        except Exception:
-            return False
+        except Exception as exc:
+            raise MemoryError(f"Failed to delete memory item {memory_id}") from exc
+
+    def delete_many(self, where: Optional[Dict[str, Any]] = None) -> int:
+        result = self.collection.get(where=where)
+        ids = result.get("ids", []) if result else []
+        if not ids:
+            return 0
+        self.collection.delete(ids=ids)
+        return len(ids)
+
+    def list(self, where: Optional[Dict[str, Any]] = None, limit: Optional[int] = None) -> List[MemoryItem]:
+        result = self.collection.get(where=where, limit=limit)
+        ids = result.get("ids", []) if result else []
+        documents = result.get("documents", []) if result else []
+        metadatas = result.get("metadatas", []) if result else []
+        return [
+            self._to_memory_item(item_id, document, metadatas[index] if metadatas else {})
+            for index, (item_id, document) in enumerate(zip(ids, documents))
+        ]
 
     def clear(self) -> None:
         # 删除并重建集合

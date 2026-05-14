@@ -15,11 +15,17 @@ from enum import Enum
 import logging
 
 from ai_researcher_assistant.llm import BaseLLM
-from ai_researcher_assistant.skills.registry import SkillRegistry, get_skill_registry
+from ai_researcher_assistant.skills.registry import SkillRegistry
 from ai_researcher_assistant.orchestration.state import ExecutionState, ExecutionStep, ExecutionStatus
 from ai_researcher_assistant.orchestration.middleware import MiddlewareManager
 from ai_researcher_assistant.core.message import Conversation, MessageRole
 from ai_researcher_assistant.core.exceptions import SkillError, LLMError
+from ai_researcher_assistant.harness.parsing import (
+    extract_action,
+    extract_final_answer,
+    extract_json_block,
+    extract_thought,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +60,7 @@ class BaseLoop(ABC):
         config: Optional[LoopConfig] = None,
     ):
         self.llm = llm
-        self.skill_registry = skill_registry or get_skill_registry()
+        self.skill_registry = skill_registry or SkillRegistry()
         self.middleware = middleware_manager or MiddlewareManager()
         self.config = config or LoopConfig()
 
@@ -221,56 +227,24 @@ Important rules:
         content = response.content
 
         thought = self._extract_thought(content)
+        final_answer = self._extract_final_answer(content)
+        if final_answer:
+            return f"Thought: {thought}\nFinal Answer: {final_answer}", None
         action = self._extract_action(content)
 
         return thought, action
 
     def _extract_thought(self, text: str) -> str:
         """提取 Thought 部分"""
-        pattern = r"Thought:\s*(.+?)(?=\n\s*(?:Action:|Final Answer:)|$)"
-        match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-        return text.strip()
+        return extract_thought(text)
 
     def _extract_action(self, text: str) -> Optional[Dict[str, Any]]:
         """提取 JSON 格式的 Action"""
-        # 方法1: JSON 代码块 (处理可能的多行)
-        pattern = r"```json\s*(\{.*?\})\s*```"
-        match = re.search(pattern, text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
-
-        # 方法2: 行内 JSON
-        pattern = r"Action:\s*(\{.*?\})"
-        match = re.search(pattern, text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
-
-        # 方法3: 查找任意 JSON 对象包含 "skill" 字段
-        pattern = r'\{[^{}]*"skill"\s*:\s*"[^"]+"\s*[^{}]*\}'
-        match = re.search(pattern, text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(0))
-            except json.JSONDecodeError:
-                pass
-
-        return None
+        return extract_action(text)
 
     def _extract_final_answer(self, text: str) -> Optional[str]:
         """提取最终答案"""
-        pattern = r"Final Answer:\s*(.+)$"
-        match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-        return None
+        return extract_final_answer(text)
 
     async def _force_final_answer(self, conversation: Conversation) -> str:
         """强制 LLM 输出最终答案"""
@@ -387,26 +361,8 @@ Example:
         messages = conversation.get_context_window()
         response = await self.llm.agenerate(messages, temperature=0.0)
 
-        # 提取 JSON 数组
-        text = response.content
-        pattern = r"```json\s*(\[.*?\])\s*```"
-        match = re.search(pattern, text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
-
-        # 尝试直接解析整个文本
-        try:
-            start = text.find('[')
-            end = text.rfind(']') + 1
-            if start != -1 and end > start:
-                return json.loads(text[start:end])
-        except json.JSONDecodeError:
-            pass
-
-        return None
+        parsed = extract_json_block(response.content)
+        return parsed if isinstance(parsed, list) else None
 
     async def _synthesize_answer(
         self, task: str, plan: List[Dict], results: Dict, conversation: Conversation
@@ -475,17 +431,8 @@ Example:
 }}
 """
         response = await self.llm.agenerate([{"role": "user", "content": prompt}], temperature=0.0)
-        text = response.content
-        # 提取 JSON
-        match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
-        if match:
-            return json.loads(match.group(1))
-        # 尝试直接解析
-        start = text.find('{')
-        end = text.rfind('}') + 1
-        if start != -1:
-            return json.loads(text[start:end])
-        return {"subtasks": [], "parallel_groups": []}
+        parsed = extract_json_block(response.content)
+        return parsed if isinstance(parsed, dict) else {"subtasks": [], "parallel_groups": []}
 
     async def _execute_dag(
         self, dag: Dict[str, Any], state: ExecutionState, context: Dict[str, Any]

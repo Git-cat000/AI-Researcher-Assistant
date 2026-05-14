@@ -1,97 +1,110 @@
-"""
-学术研究助手 Agent。
-整合 LLM、记忆、技能和编排循环，提供完整的 Agent 功能。
-"""
-from typing import Optional, Dict, Any, List, AsyncIterator
+"""ResearcherAgent facade for the LLM harness."""
+
+from collections.abc import AsyncIterator, Callable
+import asyncio
 import logging
+from typing import Any
 
 from ai_researcher_assistant.core.base_agent import BaseAgent
-from ai_researcher_assistant.core.config import AgentConfig, get_config
-from ai_researcher_assistant.core.message import Conversation, MessageRole
+from ai_researcher_assistant.core.config import AgentConfig
+from ai_researcher_assistant.core.message import Conversation
+from ai_researcher_assistant.harness.context import AgentContext
 from ai_researcher_assistant.llm import BaseLLM, create_llm
-from ai_researcher_assistant.memory import ShortTermMemory, AcademicRAG
-from ai_researcher_assistant.skills import SkillRegistry, get_skill_registry, SkillLoader
+from ai_researcher_assistant.memory import AcademicRAG, ShortTermMemory
 from ai_researcher_assistant.orchestration.loop import ReActLoop
+from ai_researcher_assistant.orchestration.middleware import LoggingMiddleware, MiddlewareManager, TelemetryMiddleware
 from ai_researcher_assistant.orchestration.state import ExecutionState
-from ai_researcher_assistant.orchestration.middleware import MiddlewareManager, LoggingMiddleware, TelemetryMiddleware
+from ai_researcher_assistant.skills import SkillLoader, SkillRegistry
 
 logger = logging.getLogger(__name__)
 
 
 class ResearcherAgent(BaseAgent):
-    """
-    学术研究助手 Agent。
-    
-    特性：
-    - 自动管理对话历史和短期记忆
-    - 集成学术 RAG 知识库
-    - 支持多种学术技能（arXiv 抓取、PDF 阅读、写作润色）
-    - ReAct 自主推理循环
-    """
+    """Academic research agent assembled around a stable harness loop."""
 
     def __init__(
         self,
-        config: Optional[AgentConfig] = None,
+        config: AgentConfig | None = None,
         name: str = "AI Researcher Assistant",
-        llm: Optional[BaseLLM] = None,
+        llm: BaseLLM | None = None,
+        llm_factory: Callable[[Any], BaseLLM] = create_llm,
         enable_rag: bool = True,
         enable_builtin_skills: bool = True,
+        skill_registry: SkillRegistry | None = None,
     ):
         super().__init__(config, name)
-        
-        self.llm = llm or create_llm(self.config.llm)
-        
+        self._llm_factory = llm_factory
+        self._provided_llm = llm
+        self._enable_rag = enable_rag
+        self._enable_builtin_skills = enable_builtin_skills
+
+        self.llm: BaseLLM | None = llm
         self.short_term_memory = ShortTermMemory(max_tokens=self.config.memory.short_term_max_tokens)
-        self.rag = AcademicRAG() if enable_rag else None
-        
-        self.skill_registry = get_skill_registry()
-        if enable_builtin_skills:
-            self._load_builtin_skills()
-        
+        self.rag: AcademicRAG | None = None
+        self.skill_registry = skill_registry or SkillRegistry()
         self.middleware = MiddlewareManager()
+        self.telemetry: TelemetryMiddleware | None = None
+        self.loop: ReActLoop | None = None
+        self.execution_state: ExecutionState | None = None
+
+    def initialize(self) -> None:
+        """Initialize runtime resources without creating RAG until it is needed."""
+
+        if self._initialized:
+            return
+
+        self.llm = self.llm or self._llm_factory(self.config.llm)
+        if self._enable_builtin_skills and not self.skill_registry.list_skills():
+            self._load_builtin_skills()
+
         self._setup_middleware()
-        
         self.loop = ReActLoop(
             llm=self.llm,
             skill_registry=self.skill_registry,
             middleware_manager=self.middleware,
         )
-        
-        self.execution_state: Optional[ExecutionState] = None
         self._initialized = True
+        logger.info("ResearcherAgent '%s' initialized", self.name)
 
-    def _load_builtin_skills(self):
+    async def start(self) -> None:
+        """Async lifecycle alias for harness-friendly callers."""
+
+        self.initialize()
+
+    async def stop(self) -> None:
+        """Async lifecycle alias for harness-friendly callers."""
+
+        self.shutdown()
+
+    def _load_builtin_skills(self) -> None:
         loader = SkillLoader(self.skill_registry)
         loader.load_builtin_skills()
-        logger.info(f"Loaded {len(self.skill_registry.list_skills())} built-in skills")
+        logger.info("Loaded %d built-in skills", len(self.skill_registry.list_skills()))
 
-    def _setup_middleware(self):
+    def _setup_middleware(self) -> None:
         if self.config.enable_telemetry:
             self.middleware.add(LoggingMiddleware())
             self.telemetry = TelemetryMiddleware()
             self.middleware.add(self.telemetry)
-        else:
-            self.telemetry = None
-
-    def initialize(self):
-        super().initialize()
-        logger.info(f"ResearcherAgent '{self.name}' initialized")
 
     def process(self, user_input: str) -> str:
-        import asyncio
-        return asyncio.run(self.aprocess(user_input))
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.aprocess(user_input))
+        raise RuntimeError("ResearcherAgent.process() cannot run inside an active event loop; use await aprocess().")
 
     async def aprocess(self, user_input: str) -> str:
+        if not self._initialized:
+            self.initialize()
+        if self.loop is None:
+            raise RuntimeError("ResearcherAgent failed to initialize its execution loop.")
+
         self.short_term_memory.add(user_input, metadata={"role": "user"})
-        
         context = self._build_context()
-        
         self.execution_state = await self.loop.run(user_input, context)
-        
         answer = self.execution_state.final_answer or "Sorry, I couldn't complete the task."
-        
         self.short_term_memory.add(answer, metadata={"role": "assistant"})
-        
         return answer
 
     async def stream_process(self, user_input: str) -> AsyncIterator[str]:
@@ -99,44 +112,53 @@ class ResearcherAgent(BaseAgent):
         for char in answer:
             yield char
 
-    def _build_context(self) -> Dict[str, Any]:
+    def _build_context(self) -> AgentContext:
         return {
             "llm": self.llm,
             "conversation": self._build_conversation(),
             "short_term_memory": self.short_term_memory,
             "rag": self.rag,
             "config": self.config,
+            "skill_registry": self.skill_registry,
         }
 
     def _build_conversation(self) -> Conversation:
         conv = Conversation()
-        conv.add_system(self.loop.build_system_prompt())
+        if self.loop is not None:
+            conv.add_system(self.loop.build_system_prompt())
         for msg in self.short_term_memory.get_messages():
-            conv.add(msg.role, msg.content, **msg.metadata)
+            metadata = dict(msg.metadata)
+            metadata.pop("role", None)
+            conv.add(msg.role, msg.content, **metadata)
         return conv
 
-    def search_knowledge_base(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        if self.rag:
-            return self.rag.search_papers(query, top_k=top_k)
-        return []
+    def _ensure_rag(self) -> AcademicRAG | None:
+        if not self._enable_rag:
+            return None
+        if self.rag is None:
+            self.rag = AcademicRAG()
+        return self.rag
+
+    def search_knowledge_base(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
+        rag = self._ensure_rag()
+        return rag.search_papers(query, top_k=top_k) if rag else []
 
     def add_paper_to_knowledge_base(
         self,
         title: str,
         abstract: str,
-        full_text: Optional[str] = None,
-        **kwargs
-    ) -> List[str]:
-        if self.rag:
-            return self.rag.add_paper(title, abstract, full_text, **kwargs)
-        return []
+        full_text: str | None = None,
+        **kwargs: Any,
+    ) -> list[str]:
+        rag = self._ensure_rag()
+        return rag.add_paper(title, abstract, full_text, **kwargs) if rag else []
 
-    def get_execution_history(self) -> List[Dict[str, Any]]:
+    def get_execution_history(self) -> list[dict[str, Any]]:
         if self.execution_state:
             return [step.to_dict() for step in self.execution_state.steps]
         return []
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         stats = {
             "short_term_messages": self.short_term_memory.count(),
             "rag_papers": self.rag.count_papers() if self.rag else 0,
@@ -149,10 +171,10 @@ class ResearcherAgent(BaseAgent):
             stats["steps_taken"] = self.execution_state.current_step
         return stats
 
-    def reset_conversation(self):
+    def reset_conversation(self) -> None:
         super().reset_conversation()
         self.short_term_memory.clear()
         self.execution_state = None
 
-    def shutdown(self):
-        logger.info(f"Shutting down ResearcherAgent '{self.name}'")
+    def shutdown(self) -> None:
+        logger.info("Shutting down ResearcherAgent '%s'", self.name)

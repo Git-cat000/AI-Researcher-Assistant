@@ -6,6 +6,7 @@ from ai_researcher_assistant.core.config import (
     MemoryConfig,
     SkillsConfig,
     get_config,
+    load_config_from_env,
     update_config,
 )
 from ai_researcher_assistant.core.exceptions import (
@@ -29,6 +30,7 @@ __all__ = [
     "MemoryConfig",
     "SkillsConfig",
     "get_config",
+    "load_config_from_env",
     "update_config",
     # Exceptions
     "AgentError",
