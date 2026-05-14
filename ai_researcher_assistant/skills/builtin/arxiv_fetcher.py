@@ -73,19 +73,13 @@ This skill is read-only and does not modify any data.
         search_query = query
         if categories:
             cat_query = " OR ".join([f"cat:{cat}" for cat in categories])
-            if search_query:
-                search_query = f"({search_query}) AND ({cat_query})"
-            else:
-                search_query = cat_query
+            search_query = f"({search_query}) AND ({cat_query})" if search_query else cat_query
 
         if days_back > 0:
             cutoff_date = datetime.now() - timedelta(days=days_back)
             date_str = cutoff_date.strftime("%Y%m%d")
             date_filter = f"submittedDate:[{date_str}000000 TO 999999999999]"
-            if search_query:
-                search_query = f"({search_query}) AND {date_filter}"
-            else:
-                search_query = date_filter
+            search_query = f"({search_query}) AND {date_filter}" if search_query else date_filter
 
         sort_map = {
             "relevance": arxiv.SortCriterion.Relevance,

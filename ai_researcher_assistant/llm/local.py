@@ -72,10 +72,12 @@ class OllamaLLM(BaseLLM):
             }
 
             timeout = aiohttp.ClientTimeout(total=120)
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.generate_url, json=payload, timeout=timeout) as resp:
-                    resp.raise_for_status()
-                    data = await resp.json()
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(self.generate_url, json=payload, timeout=timeout) as resp,
+            ):
+                resp.raise_for_status()
+                data = await resp.json()
 
             return LLMResponse(
                 content=data.get("message", {}).get("content", ""),
@@ -104,16 +106,18 @@ class OllamaLLM(BaseLLM):
             }
 
             timeout = aiohttp.ClientTimeout(total=120)
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.generate_url, json=payload, timeout=timeout) as resp:
-                    resp.raise_for_status()
-                    async for line in resp.content:
-                        if line:
-                            try:
-                                data = json.loads(line)
-                                if "message" in data and "content" in data["message"]:
-                                    yield data["message"]["content"]
-                            except json.JSONDecodeError:
-                                continue
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(self.generate_url, json=payload, timeout=timeout) as resp,
+            ):
+                resp.raise_for_status()
+                async for line in resp.content:
+                    if line:
+                        try:
+                            data = json.loads(line)
+                            if "message" in data and "content" in data["message"]:
+                                yield data["message"]["content"]
+                        except json.JSONDecodeError:
+                            continue
         except Exception as e:
             raise LLMError(f"Ollama streaming error: {str(e)}") from e

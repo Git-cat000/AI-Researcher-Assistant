@@ -1,9 +1,4 @@
-"""
-Basic unit tests for AI Researcher Assistant.
-Run with: pytest tests/
-"""
-
-import pytest
+"""Basic unit tests for AI Researcher Assistant."""
 
 from ai_researcher_assistant.core import Conversation, MessageRole
 from ai_researcher_assistant.llm import BaseLLM, LLMResponse
@@ -12,21 +7,22 @@ from ai_researcher_assistant.orchestration import ReActLoop
 from ai_researcher_assistant.skills import SkillRegistry
 
 
-class MockLLM(BaseLLM):
-    """Mock LLM for testing without API calls"""
+class ScriptedLLM(BaseLLM):
+    """Mock LLM that returns pre-configured responses for testing loops."""
 
-    def __init__(self):
+    def __init__(self, responses=None):
         super().__init__(model="mock", temperature=0.0)
+        self.responses = list(responses or [])
 
     def generate(self, messages, **kwargs):
-        return LLMResponse(content="Mock response", model="mock")
+        content = self.responses.pop(0) if self.responses else "Final Answer: Done."
+        return LLMResponse(content=content, model="mock")
 
     async def agenerate(self, messages, **kwargs):
-        return LLMResponse(content="Mock response", model="mock")
+        return self.generate(messages, **kwargs)
 
     async def stream_generate(self, messages, **kwargs):
-        yield "Mock"
-        yield " response"
+        yield self.generate(messages, **kwargs).content
 
 
 def test_short_term_memory():
@@ -56,19 +52,34 @@ def test_message_conversation():
     assert context[1]["role"] == "user"
 
 
-@pytest.mark.asyncio
-async def test_react_loop_mock():
-    """Test ReAct loop with mock LLM and skill registry"""
-    llm = MockLLM()
+async def test_react_loop_completes_with_final_answer():
+    """ReAct loop returns execution state with a final answer."""
+    llm = ScriptedLLM(["Final Answer: Test completed."])
     registry = SkillRegistry()
-
     loop = ReActLoop(llm=llm, skill_registry=registry)
 
-    # This would normally call LLM and skills; with mocks it should complete
-    # For a real test, we'd need to mock the skill execution as well
-    # For now, we just test initialization
-    assert loop.llm is not None
-    assert loop.skill_registry is not None
+    state = await loop.run("Test task", context={})
+
+    assert state.final_answer == "Test completed."
+    assert state.status.value == "completed"
+
+
+async def test_react_loop_detects_skill_action():
+    """ReAct loop parses an action and attempts skill execution."""
+    action_json = (
+        "Thought: Use skill.\n"
+        "Action:\n"
+        "```json\n"
+        '{"skill": "paper_writer", "parameters": {"action": "summarize", "text": "test"}}\n'
+        "```"
+    )
+    llm = ScriptedLLM([action_json, "Final Answer: Skill called."])
+    registry = SkillRegistry()
+    loop = ReActLoop(llm=llm, skill_registry=registry)
+
+    state = await loop.run("Test task", context={})
+
+    assert state.final_answer is not None
 
 
 def test_config():
@@ -78,7 +89,3 @@ def test_config():
     config = get_config()
     assert config.llm.provider == "openai"
     assert config.memory.chunk_size == 1000
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])

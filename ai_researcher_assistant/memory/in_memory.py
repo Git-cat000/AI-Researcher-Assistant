@@ -47,7 +47,7 @@ class InMemoryVectorMemory(BaseMemory):
         if not items:
             return []
         embeddings = self.embedding_model.embed_batch([item.content for item in items])
-        for item, embedding in zip(items, embeddings):
+        for item, embedding in zip(items, embeddings, strict=True):
             item.embedding = embedding
             self._items[item.id] = item
         return [item.id for item in items]

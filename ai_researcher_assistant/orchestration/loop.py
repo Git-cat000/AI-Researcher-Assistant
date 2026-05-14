@@ -83,6 +83,36 @@ You must reason step by step and use skills when necessary.
         skill_instructions = self.skill_registry.get_instructions_for_all()
         return self.base_system_prompt.format(skill_instructions=skill_instructions)
 
+    def _init_conversation(self, task: str, context: dict[str, Any], task_prefix: str = "") -> Conversation:
+        """Set up a conversation with system prompt and initial user task."""
+        conversation = context.get("conversation") or Conversation()
+        conversation.add_system(self.build_system_prompt())
+        conversation.add(MessageRole.USER, f"{task_prefix}{task}" if task_prefix else task)
+        return conversation
+
+    async def _handle_loop_error(
+        self, state: ExecutionState, error: Exception, context: dict[str, Any], loop_name: str
+    ) -> None:
+        """Wrap a loop-level exception with logging, middleware notification, and state update."""
+        logger.exception("Error in %s loop", loop_name)
+        await self.middleware.trigger_on_error(state, error, context)
+        state.fail(str(error))
+
+    async def _synthesize_final_answer(self, task: str, summary_data: dict, conversation: Conversation) -> str:
+        """Prompt the LLM to synthesize a final answer from structured execution results."""
+        prompt = f"""Based on the execution results for task: "{task}"
+
+Summary:
+{json.dumps(summary_data, indent=2)}
+
+Please provide a comprehensive final answer to the user's original task.
+Include citations and references where appropriate."""
+
+        conversation.add(MessageRole.USER, prompt)
+        messages = conversation.get_context_window()
+        response = await self.llm.agenerate(messages, temperature=0.0)
+        return response.content
+
     async def _execute_skill(
         self, skill_name: str, parameters: dict[str, Any], context: dict[str, Any]
     ) -> dict[str, Any]:
@@ -160,9 +190,7 @@ Important rules:
         state = ExecutionState(max_steps=self.config.max_steps)
         state.start_task(task)
 
-        conversation = context.get("conversation") or Conversation()
-        conversation.add_system(self.build_system_prompt())
-        conversation.add(MessageRole.USER, task)
+        conversation = self._init_conversation(task, context)
 
         try:
             while state.current_step < state.max_steps:
@@ -173,14 +201,12 @@ Important rules:
 
                 step = ExecutionStep(thought=thought)
 
-                # 检查是否已完成
-                final_answer = self._extract_final_answer(thought)
+                final_answer = extract_final_answer(thought)
                 if final_answer:
                     state.complete(final_answer)
                     break
 
                 if action is None:
-                    # 没有行动也没有最终答案，要求继续
                     conversation.add(MessageRole.ASSISTANT, thought)
                     conversation.add(MessageRole.USER, "Please provide an Action or Final Answer.")
                     continue
@@ -198,24 +224,19 @@ Important rules:
                 state.add_step(step)
                 state.status = ExecutionStatus.OBSERVING
 
-                # 添加到对话历史
                 conversation.add(MessageRole.ASSISTANT, f"Thought: {thought}\nAction: {json.dumps(action)}")
                 conversation.add(MessageRole.OBSERVATION, f"Observation: {observation}")
 
-                # 检查是否失败过多
                 if not result.get("success") and self._should_abort(state):
                     state.fail("Too many skill failures")
                     break
 
-            # 超过最大步数，强制生成答案
             if state.status not in [ExecutionStatus.COMPLETED, ExecutionStatus.FAILED]:
                 final = await self._force_final_answer(conversation)
                 state.complete(final)
 
         except Exception as e:
-            logger.exception("Error in ReAct loop")
-            await self.middleware.trigger_on_error(state, e, context)
-            state.fail(str(e))
+            await self._handle_loop_error(state, e, context, "ReAct")
 
         return state
 
@@ -227,25 +248,13 @@ Important rules:
         response = await self.llm.agenerate(messages, temperature=self.config.temperature)
         content = response.content
 
-        thought = self._extract_thought(content)
-        final_answer = self._extract_final_answer(content)
+        thought = extract_thought(content)
+        final_answer = extract_final_answer(content)
         if final_answer:
             return f"Thought: {thought}\nFinal Answer: {final_answer}", None
-        action = self._extract_action(content)
+        action = extract_action(content)
 
         return thought, action
-
-    def _extract_thought(self, text: str) -> str:
-        """提取 Thought 部分"""
-        return extract_thought(text)
-
-    def _extract_action(self, text: str) -> dict[str, Any] | None:
-        """提取 JSON 格式的 Action"""
-        return extract_action(text)
-
-    def _extract_final_answer(self, text: str) -> str | None:
-        """提取最终答案"""
-        return extract_final_answer(text)
 
     async def _force_final_answer(self, conversation: Conversation) -> str:
         """强制 LLM 输出最终答案"""
@@ -307,22 +316,19 @@ Example:
         state = ExecutionState(max_steps=self.config.max_plan_steps)
         state.start_task(task)
 
-        conversation = context.get("conversation") or Conversation()
-        conversation.add_system(self.build_system_prompt())
-        conversation.add(MessageRole.USER, f"Task: {task}\n\nCreate a plan:")
+        conversation = self._init_conversation(task, context, task_prefix="Task: ")
 
         try:
-            # 1. 生成计划
+            conversation.add(MessageRole.USER, "Create a plan:")
             plan = await self._generate_plan(conversation)
             if not plan:
                 state.fail("Failed to generate a valid plan")
                 return state
 
             state.metadata["plan"] = plan
-            logger.info(f"Generated plan with {len(plan)} steps")
+            logger.info("Generated plan with %d steps", len(plan))
 
-            # 2. 执行计划
-            results = {}
+            results: dict[str, Any] = {}
             for step_info in plan:
                 step_num = step_info.get("step", state.current_step + 1)
                 description = step_info.get("description", "")
@@ -347,26 +353,21 @@ Example:
                     results[f"step_{step_num}"] = result.get("result") if result.get("success") else None
 
                     if not result.get("success"):
-                        logger.warning(f"Step {step_num} failed: {result.get('error')}")
+                        logger.warning("Step %d failed: %s", step_num, result.get("error"))
                 else:
-                    # 无技能步骤，直接记录
                     step.observation = f"Completed: {description}"
                     results[f"step_{step_num}"] = description
 
                 state.add_step(step)
                 await self.middleware.trigger_after_think(state, description, context)
 
-                # 更新上下文供后续步骤使用
                 context["plan_results"] = results
 
-            # 3. 生成最终答案
-            final_answer = await self._synthesize_answer(task, plan, results, conversation)
+            final_answer = await self._synthesize_final_answer(task, {"plan": plan, "results": results}, conversation)
             state.complete(final_answer)
 
         except Exception as e:
-            logger.exception("Error in Plan-and-Execute loop")
-            await self.middleware.trigger_on_error(state, e, context)
-            state.fail(str(e))
+            await self._handle_loop_error(state, e, context, "Plan-and-Execute")
 
         return state
 
@@ -377,21 +378,6 @@ Example:
 
         parsed = extract_json_block(response.content)
         return parsed if isinstance(parsed, list) else None
-
-    async def _synthesize_answer(self, task: str, plan: list[dict], results: dict, conversation: Conversation) -> str:
-        """综合计划执行结果生成最终答案"""
-        prompt = f"""Based on the execution of the plan for task: "{task}"
-
-Plan steps and results:
-{json.dumps({"plan": plan, "results": results}, indent=2)}
-
-Please provide a comprehensive final answer to the user's original task.
-Include citations and references where appropriate."""
-
-        conversation.add(MessageRole.USER, prompt)
-        messages = conversation.get_context_window()
-        response = await self.llm.agenerate(messages, temperature=0.0)
-        return response.content
 
 
 class LLMCompilerLoop(BaseLoop):
@@ -405,20 +391,17 @@ class LLMCompilerLoop(BaseLoop):
         state.start_task(task)
 
         try:
-            # 1. 解析任务，生成 DAG
             dag = await self._parse_dag(task, context)
             state.metadata["dag"] = dag
 
-            # 2. 并行执行无依赖的任务
             results = await self._execute_dag(dag, state, context)
 
-            # 3. 生成最终答案
-            final = await self._synthesize_dag_results(task, dag, results, context)
+            conversation = self._init_conversation(task, context)
+            final = await self._synthesize_final_answer(task, {"dag": dag, "results": results}, conversation)
             state.complete(final)
 
         except Exception as e:
-            logger.exception("Error in LLMCompiler loop")
-            state.fail(str(e))
+            await self._handle_loop_error(state, e, context, "LLMCompiler")
 
         return state
 
@@ -508,17 +491,6 @@ Example:
                 state.add_step(step)
 
         return results
-
-    async def _synthesize_dag_results(self, task: str, dag: dict, results: dict, context: dict) -> str:
-        """综合 DAG 结果"""
-        prompt = f"""Task: {task}
-
-Execution results from subtasks:
-{json.dumps(results, indent=2)}
-
-Please provide a comprehensive final answer."""
-        response = await self.llm.agenerate([{"role": "user", "content": prompt}], temperature=0.0)
-        return response.content
 
 
 def create_loop(

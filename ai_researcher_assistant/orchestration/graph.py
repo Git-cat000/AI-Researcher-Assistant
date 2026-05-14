@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Any
 
 from ai_researcher_assistant.core.message import Conversation, MessageRole
+from ai_researcher_assistant.harness.parsing import extract_action, extract_final_answer, extract_thought
 from ai_researcher_assistant.llm import BaseLLM
 from ai_researcher_assistant.orchestration.state import ExecutionState, ExecutionStep
 from ai_researcher_assistant.skills.registry import SkillRegistry
@@ -104,10 +105,7 @@ class StateGraph:
         registry = skill_registry or SkillRegistry()
 
         async def skill_node(state: GraphState) -> GraphState:
-            if param_mapping:
-                params = param_mapping(state)
-            else:
-                params = state.get("skill_parameters", {})
+            params = param_mapping(state) if param_mapping else state.get("skill_parameters", {})
             result = await registry.aexecute(skill_name, params, {"state": state})
             state["skill_result"] = result
             if not result.get("success"):
@@ -282,27 +280,13 @@ class AgentGraphBuilder:
             response = await self.llm.agenerate(messages, temperature=0.0)
             state["llm_response"] = response.content
 
-            import re
-
             text = response.content
-            thought_match = re.search(r"Thought:\s*(.+?)(?=Action:|$)", text, re.DOTALL)
-            state["thought"] = thought_match.group(1).strip() if thought_match else text
-
-            action_match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
-            if action_match:
-                import json
-
-                try:
-                    state["action"] = json.loads(action_match.group(1))
-                except (json.JSONDecodeError, TypeError):
-                    state["action"] = None
-            else:
-                state["action"] = None
-
-            if "Final Answer:" in text:
+            state["thought"] = extract_thought(text)
+            state["action"] = extract_action(text)
+            final_answer = extract_final_answer(text)
+            if final_answer:
                 state["is_final"] = True
-                final_match = re.search(r"Final Answer:\s*(.+)$", text, re.DOTALL)
-                state["final_answer"] = final_match.group(1).strip() if final_match else text
+                state["final_answer"] = final_answer
             else:
                 state["is_final"] = False
 

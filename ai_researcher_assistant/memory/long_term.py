@@ -97,7 +97,7 @@ class LongTermMemory(BaseMemory):
         metadatas = [
             {k: json.dumps(v) if not isinstance(v, str) else v for k, v in item.metadata.items()} for item in items
         ]
-        for meta, item in zip(metadatas, items):
+        for meta, item in zip(metadatas, items, strict=True):
             meta["created_at"] = item.created_at.isoformat()
 
         self.collection.add(
@@ -172,7 +172,7 @@ class LongTermMemory(BaseMemory):
         metadatas = result.get("metadatas", []) if result else []
         return [
             self._to_memory_item(item_id, document, metadatas[index] if metadatas else {})
-            for index, (item_id, document) in enumerate(zip(ids, documents))
+            for index, (item_id, document) in enumerate(zip(ids, documents, strict=True))
         ]
 
     def clear(self) -> None:

@@ -60,10 +60,12 @@ def extract_thought(text: str) -> str:
 
 
 def extract_final_answer(text: str) -> str | None:
-    """Extract a final answer section from a model response."""
+    """Extract the content after the last Final Answer: marker."""
 
-    match = re.search(r"Final Answer:\s*(.+)$", text, re.DOTALL | re.IGNORECASE)
-    return match.group(1).strip() if match else None
+    parts = re.split(r"Final Answer:\s*", text, flags=re.IGNORECASE)
+    if len(parts) > 1:
+        return parts[-1].strip()
+    return None
 
 
 def _loads_json(raw: str) -> dict[str, Any] | list[Any] | None:

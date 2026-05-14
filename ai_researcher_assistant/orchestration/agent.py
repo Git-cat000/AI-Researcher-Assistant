@@ -91,7 +91,10 @@ class ResearcherAgent(BaseAgent):
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(self.aprocess(user_input))
-        raise RuntimeError("ResearcherAgent.process() cannot run inside an active event loop; use await aprocess().")
+        raise RuntimeError(
+            "ResearcherAgent.process() cannot run inside an active event loop "
+            "(e.g. Jupyter, FastAPI, or an async test). Use: await agent.aprocess(user_input)"
+        )
 
     async def aprocess(self, user_input: str) -> str:
         if not self._initialized:

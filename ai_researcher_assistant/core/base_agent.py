@@ -30,9 +30,9 @@ class BaseAgent(ABC):
         """初始化 Agent（加载资源、建立连接等）"""
         self._initialized = True
 
-    def shutdown(self):
-        """清理资源"""
-        pass
+    def shutdown(self) -> None:
+        """Subclasses may override to release resources. Base implementation is a no-op."""
+        return
 
     @abstractmethod
     def process(self, user_input: str) -> str:
