@@ -12,3 +12,6 @@ venv/
 data/
 build/
 dist/
+AGENTS.md
+CLAUDE.md
+TECHNICAL_PLAN.md
