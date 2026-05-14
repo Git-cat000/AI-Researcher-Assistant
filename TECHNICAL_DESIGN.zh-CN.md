@@ -86,7 +86,7 @@ OpenAI-compatible provider 统一走 `OpenAILLM`，通过 `base_url` 接入。
 {"role": "user", "content": "..."}
 ```
 
-当前 token 裁剪仍是粗略实现，后续可接入 `tiktoken` 或 provider tokenizer。
+token 裁剪已通过 `estimate_tokens()` 和 `truncate_to_token_budget()` 实现，采用 CJK 字符加权估算。
 
 #### exceptions.py
 
@@ -668,7 +668,7 @@ python -m build
 ```text
 ruff: All checks passed
 mypy: Success, no issues found in 36 source files
-11 passed
+12 passed
 pip check: No broken requirements found
 build: wheel/sdist generated successfully
 ```
@@ -677,10 +677,10 @@ build: wheel/sdist generated successfully
 
 ### 10.1 Skill 系统
 
-- `skills/builtin/` 是唯一的内置技能入口，历史拼写错误目录已删除。
-- 支持 Markdown Skill 中声明参数 schema。
-- 支持 Markdown Skill 的资源按需读取策略。
-- 为 scripts 增加明确权限边界，默认不自动执行。
+- `skills/builtin/` 是唯一的内置技能入口，历史拼写错误目录已删除。✅
+- 支持 Markdown Skill 中声明参数 schema。✅
+- 支持 Markdown Skill 的资源按需读取策略。✅
+- 为 scripts 增加明确权限边界，默认不自动执行。✅ (PermissionPolicy)
 
 ### 10.2 RAG 系统
 
@@ -688,25 +688,25 @@ build: wheel/sdist generated successfully
 - 支持 reranker。
 - 支持按论文、章节、年份、作者过滤。
 - 支持 citation graph。
-- 支持增量更新和删除。
+- 支持增量更新和删除。✅
 
 ### 10.3 Harness
 
-- 将 loop 中重复逻辑继续下沉到 `harness/`。
-- 定义标准 `Action` schema。
-- 定义标准 `Observation` schema。
-- 增加权限管理。
-- 增加 token budget 和 cost tracking。
+- 将 loop 中重复逻辑继续下沉到 `harness/`。✅ (BaseLoop 共享方法)
+- 定义标准 `Action` schema。✅ (harness/schema.py)
+- 定义标准 `Observation` schema。✅ (harness/schema.py)
+- 增加权限管理。✅ (PermissionPolicy)
+- 增加 token budget 和 cost tracking。✅ (TokenBudget, CostTracker)
 
 ### 10.4 模型层
 
-- 将 provider extras 从主依赖中拆分。
+- 将 provider extras 从主依赖中拆分。✅ (chromadb, anthropic 改为可选)
 - 增加更多本地 OpenAI-compatible server 示例。
 - 增加模型 capability 描述，例如是否支持 tool call、vision、long context。
 
 ### 10.5 工程质量
 
-- 增加 CI。
-- 增加 coverage。
+- 增加 CI。✅ (.github/workflows/ci.yml)
+- 增加 coverage。✅ (pytest-cov 已配置)
 - 提高 mypy 严格度，逐步为更多未标注函数开启 `check_untyped_defs`。
 - 补全 long_term memory 和 graph integration tests。
