@@ -10,7 +10,7 @@ The model is the agent. The code is the harness.
 
 The model decides what to do next. The harness supplies stable contracts, tools, memory, observations, permissions, token budgets, and execution structure.
 
-Chinese documentation is available in [README.zh-CN.md](README.zh-CN.md). The detailed technical design and roadmap are in [TECHNICAL_DESIGN.zh-CN.md](TECHNICAL_DESIGN.zh-CN.md).
+Chinese documentation is available in [README.zh-CN.md](README.zh-CN.md). The detailed technical design and roadmap are in [TECHNICAL_DESIGN.md](TECHNICAL_DESIGN.md), with a Chinese version in [TECHNICAL_DESIGN.zh-CN.md](TECHNICAL_DESIGN.zh-CN.md).
 
 ## Current Capabilities
 
