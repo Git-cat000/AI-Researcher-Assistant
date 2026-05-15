@@ -30,6 +30,13 @@ from ai_researcher_assistant.orchestration.state import (
     ExecutionStatus,
     ExecutionStep,
 )
+from ai_researcher_assistant.orchestration.subagent import (
+    DEFAULT_SUBAGENTS,
+    SubagentResult,
+    SubagentRunner,
+    SubagentSpec,
+    SubagentTask,
+)
 
 __all__ = [
     # Loop
@@ -59,4 +66,9 @@ __all__ = [
     "TelemetryMiddleware",
     # Agent
     "ResearcherAgent",
+    "SubagentRunner",
+    "SubagentSpec",
+    "SubagentTask",
+    "SubagentResult",
+    "DEFAULT_SUBAGENTS",
 ]

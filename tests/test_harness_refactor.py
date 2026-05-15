@@ -177,3 +177,38 @@ Action:
     answer = agent.process("Plan a literature review about RAG.")
 
     assert answer == "Markdown skill flow completed."
+
+
+def test_parent_agent_delegates_to_summary_only_subagent():
+    registry = SkillRegistry()
+    SkillLoader(registry).load_builtin_skills()
+    llm = ScriptedLLM(
+        [
+            """Thought: I should delegate the local memory lookup.
+Action:
+```json
+{
+  "skill": "subagent_task",
+  "parameters": {
+    "agent_name": "rag_retrieval_agent",
+    "task": "Find local RAG papers about retrieval.",
+    "expected_output": "Return paper titles only."
+  }
+}
+```""",
+            (
+                "Thought: I found the relevant local context.\n"
+                "Final Answer: Child summary: no local papers were available."
+            ),
+            "Thought: The child summary is enough.\nFinal Answer: Parent final: no local papers were available.",
+        ]
+    )
+    agent = ResearcherAgent(llm=llm, enable_builtin_skills=False, enable_rag=True, skill_registry=registry)
+
+    answer = agent.process("Check local papers about retrieval.")
+    history = agent.get_execution_history()
+
+    assert answer == "Parent final: no local papers were available."
+    assert history[0]["action"]["skill"] == "subagent_task"
+    assert "Child summary" in history[0]["observation"]
+    assert "rag_retrieval_agent" in history[0]["observation"]

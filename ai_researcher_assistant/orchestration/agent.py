@@ -13,6 +13,7 @@ from ai_researcher_assistant.memory import AcademicRAG, ShortTermMemory
 from ai_researcher_assistant.orchestration.loop import ReActLoop
 from ai_researcher_assistant.orchestration.middleware import LoggingMiddleware, MiddlewareManager, TelemetryMiddleware
 from ai_researcher_assistant.orchestration.state import ExecutionState
+from ai_researcher_assistant.orchestration.subagent import SubagentRunner
 from ai_researcher_assistant.skills import SkillLoader, SkillRegistry
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class ResearcherAgent(BaseAgent):
         self.telemetry: TelemetryMiddleware | None = None
         self.loop: ReActLoop | None = None
         self.execution_state: ExecutionState | None = None
+        self.subagent_runner: SubagentRunner | None = None
 
     def initialize(self) -> None:
         """Initialize runtime resources without creating RAG until it is needed."""
@@ -53,9 +55,17 @@ class ResearcherAgent(BaseAgent):
             return
 
         self.llm = self.llm or self._llm_factory(self.config.llm)
+        if self.llm is None:
+            raise RuntimeError("ResearcherAgent failed to initialize an LLM.")
         if self._enable_builtin_skills and not self.skill_registry.list_skills():
             self._load_builtin_skills()
 
+        self.subagent_runner = SubagentRunner(
+            llm=self.llm,
+            parent_skill_registry=self.skill_registry,
+            rag=self.rag,
+            config=self.config,
+        )
         self._setup_middleware()
         self.loop = ReActLoop(
             llm=self.llm,
@@ -117,6 +127,8 @@ class ResearcherAgent(BaseAgent):
             yield char
 
     def _build_context(self) -> dict[str, Any]:
+        if self.subagent_runner is not None:
+            self.subagent_runner.rag = self.rag
         return {
             "llm": self.llm,
             "conversation": self._build_conversation(),
@@ -124,6 +136,7 @@ class ResearcherAgent(BaseAgent):
             "rag": self.rag,
             "config": self.config,
             "skill_registry": self.skill_registry,
+            "subagent_runner": self.subagent_runner,
         }
 
     def _build_conversation(self) -> Conversation:

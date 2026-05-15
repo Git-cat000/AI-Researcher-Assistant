@@ -18,6 +18,14 @@ def __getattr__(name: str):
         from ai_researcher_assistant.skills.builtin.paper_writer import PaperWriterSkill
 
         return PaperWriterSkill
+    if name == "RagSearchSkill":
+        from ai_researcher_assistant.skills.builtin.rag_search import RagSearchSkill
+
+        return RagSearchSkill
+    if name == "SubagentTaskSkill":
+        from ai_researcher_assistant.skills.builtin.subagent_task import SubagentTaskSkill
+
+        return SubagentTaskSkill
     raise AttributeError(name)
 
 
@@ -25,4 +33,6 @@ __all__ = [
     "ArxivFetcherSkill",
     "PaperReaderSkill",
     "PaperWriterSkill",
+    "RagSearchSkill",
+    "SubagentTaskSkill",
 ]

@@ -21,6 +21,7 @@
   -> LLM 生成 Thought / Action / Final Answer
   -> Harness 解析 Action 并检查权限
   -> SkillRegistry 调用 Skill
+  -> 可选：subagent_task 创建本地子 Agent 并返回 summary
   -> Observation 回写对话上下文
   -> LLM 生成最终答案
 ```
@@ -103,6 +104,8 @@ siliconflow, qwen, anthropic, ollama, local
 - `registry.py`：普通实例注册表，不再是全局单例。
 - `loader.py`：支持 Python class、Python module、目录、`SKILL.md`、standalone `.md` 和内置技能。
 - `markdown.py`：兼容 Claude Code / Codex 风格 Markdown Skill。
+- `builtin/rag_search.py`：把当前 `AcademicRAG` 暴露为确定性检索 Skill。
+- `builtin/subagent_task.py`：把本地子 Agent 委托暴露为异步 Skill。
 
 Markdown Skill 支持：
 
@@ -158,8 +161,44 @@ Markdown Skill 支持：
 - `graph.py`：轻量 LangGraph-like workflow graph。
 - `middleware.py`：生命周期 hook 和 telemetry。
 - `state.py`：执行步骤、状态和元数据。
+- `subagent.py`：本地父子 Agent 编排，创建隔离的子 ReActLoop 并只向父 Agent 返回 summary。
 
-## 8. CLI
+## 8. 本地父子 Agent
+
+父子 Agent 的目标是复用 `learn-claude-code` s04 的上下文隔离思想：父 Agent 不直接承载所有中间推理和检索痕迹，而是把局部任务交给子 Agent；子 Agent 完成后只返回可消费的 summary。
+
+执行流程：
+
+```text
+Parent ReActLoop
+  -> Action: subagent_task
+  -> SubagentTaskSkill.aexecute()
+  -> SubagentRunner.run()
+  -> child SkillRegistry(filtered)
+  -> child ReActLoop(fresh Conversation)
+  -> child Final Answer
+  -> SubagentResult(summary, artifacts, steps_taken, error)
+  -> parent Observation
+```
+
+默认角色：
+
+```text
+literature_search_agent  -> arxiv_fetcher, rag_search
+paper_reading_agent      -> paper_reader, rag_search
+rag_retrieval_agent      -> rag_search
+writing_agent            -> paper_writer, rag_search
+```
+
+关键实现原则：
+
+- 子 Agent 使用新的 `Conversation`，不继承父 Agent 的完整历史。
+- 子 Agent 共享同一个 LLM adapter 和可选 `AcademicRAG`，但只获得允许的 Skill。
+- 子 Agent 的 SkillRegistry 会过滤掉 `subagent_task`，避免递归委托。
+- 返回给父 Agent 的 observation 是 `SubagentResult.to_dict()`，包含 summary、允许使用的 skill、步数和错误信息。
+- 当前实现是本地进程内子 Agent，不依赖 MCP 或 A2A。后续如果接入远程协议，应保留相同的 summary-only 返回契约。
+
+## 9. CLI
 
 `ai_researcher_assistant/cli.py` 使用 Typer 实现命令入口，并在 `pyproject.toml` 中注册：
 
@@ -183,7 +222,7 @@ ai-researcher = "ai_researcher_assistant.cli:main"
 
 CLI 边界：命令只做参数解析、输入加载和输出格式化，核心行为委托给 `ResearcherAgent`、`AgentCliSession`、`SkillLoader` 和 `AcademicRAG`。
 
-## 9. 持续 CLI Session
+## 10. 持续 CLI Session
 
 新增 `cli_session.py`，核心类型是 `AgentCliSession`。
 
@@ -221,7 +260,7 @@ ai-researcher chat --cwd .
 python -m ai_researcher_assistant.cli chat --cwd .
 ```
 
-## 10. 本地 PDF 入库
+## 11. 本地 PDF 入库
 
 `rag ingest-pdf` 的数据流：
 
@@ -250,7 +289,7 @@ ai-researcher chat --cwd .
 ai-researcher rag ingest-pdf https://example.org/paper.pdf --output papers.jsonl --title "External Paper"
 ```
 
-## 11. 非 arXiv 来源扩展
+## 12. 非 arXiv 来源扩展
 
 论文来源不应写死在 RAG 或 LLM adapter 中。每个来源应作为单独 Source Skill：
 
@@ -303,7 +342,7 @@ Source Skill 不负责：
 }
 ```
 
-## 12. 工程化
+## 13. 工程化
 
 `pyproject.toml`：
 
@@ -315,7 +354,7 @@ Source Skill 不负责：
 
 `Makefile` 和 GitHub Actions 覆盖格式化、lint、类型检查、编译、测试、依赖检查和构建。
 
-## 13. 测试
+## 14. 测试
 
 当前测试覆盖：
 
@@ -333,6 +372,8 @@ Source Skill 不负责：
 - SkillRegistry 实例隔离。
 - PaperWriter 不内部调用 LLM。
 - Markdown Skill 与 Agent flow。
+- `rag_search` 使用当前 context 中的 `AcademicRAG`。
+- 父 Agent 通过 `subagent_task` 委托给 summary-only 子 Agent。
 
 推荐质量门：
 
@@ -347,13 +388,14 @@ python -m ai_researcher_assistant.cli doctor --json
 python -m ai_researcher_assistant.cli chat --help
 ```
 
-## 14. 后续规划
+## 15. 后续规划
 
 P0：
 
 - 给 `PermissionPolicy` 增加按 URL 域名、文件路径前缀和读写类型的细粒度规则。
 - 给 `rag ingest-pdf` 增加批量目录导入。
 - 为 Source Skill 增加标准化基类和示例实现。
+- 为 `SubagentSpec` 增加可配置加载方式，例如从项目级 YAML 或 Markdown agent profile 加载。
 
 P1：
 
@@ -361,14 +403,16 @@ P1：
 - 增加 citation-aware rerank。
 - 增加 CLI 中的本地知识库保存/恢复能力。
 - 增加 `py.typed`。
+- 增加子 Agent 执行 trace 的评测样例，验证 summary-only 上下文隔离。
 
 P2：
 
 - 增加 Semantic Scholar、OpenAlex、Crossref 等来源 Skill。
 - 增加评测 harness，用固定 mock LLM trace 回放 Agent 流程。
 - 增加 release artifact 验证、changelog 和版本发布流程。
+- 在保持本地默认路径的前提下，评估 MCP 工具协议和 A2A 多 Agent 协议适配层。
 
-## 15. 维护规则
+## 16. 维护规则
 
 - 新依赖必须更新 `pyproject.toml`、文档和测试。
 - 新 context key 必须更新 `harness/context.py`。

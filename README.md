@@ -21,6 +21,8 @@ Chinese documentation is available in [README.zh-CN.md](README.zh-CN.md). The de
 - Accepts Markdown skill folders with `SKILL.md`, `references/`, `scripts/`, and `assets/`.
 - Parses Markdown skill parameter schemas from common frontmatter shapes.
 - Keeps skills deterministic: skills return structured observations and do not call the LLM.
+- Supports local parent-child agent delegation through `subagent_task`; child agents run with isolated context and return summary-only results.
+- Provides a built-in `rag_search` skill so loops and subagents can query the current local RAG memory.
 - Provides local dependency-free RAG with hash embeddings and optional ChromaDB persistence.
 - Supports hybrid vector + BM25-style retrieval, filters, lightweight reranking, citation metadata, and citation graph export.
 - Tracks harness-level actions, observations, permissions, token budgets, and model token usage.
@@ -189,6 +191,21 @@ Compare claims, methods, evidence, limitations, and open research gaps.
 ```
 
 Markdown skills return instructions, metadata, resource paths, and optionally requested reference contents. `scripts/` paths are exposed as resources but are not executed by default.
+
+## Local Subagents
+
+The project supports local parent-child delegation inspired by the `learn-claude-code` s04 pattern. The parent agent can call `subagent_task`; the harness then creates a fresh child ReAct loop, gives it a scoped skill registry, and returns only a structured summary to the parent observation.
+
+Default child roles:
+
+```text
+literature_search_agent  -> arxiv_fetcher, rag_search
+paper_reading_agent      -> paper_reader, rag_search
+rag_retrieval_agent      -> rag_search
+writing_agent            -> paper_writer, rag_search
+```
+
+This keeps the parent context compact while allowing focused child work. Subagents are local in-process runners, not MCP or A2A remote agents. Skills still do not call the LLM directly; the child loop owns model reasoning.
 
 ## Beyond arXiv Sources
 

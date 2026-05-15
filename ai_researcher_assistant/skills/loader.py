@@ -116,6 +116,8 @@ class SkillLoader:
             "ai_researcher_assistant.skills.builtin.arxiv_fetcher.ArxivFetcherSkill",
             "ai_researcher_assistant.skills.builtin.paper_reader.PaperReaderSkill",
             "ai_researcher_assistant.skills.builtin.paper_writer.PaperWriterSkill",
+            "ai_researcher_assistant.skills.builtin.rag_search.RagSearchSkill",
+            "ai_researcher_assistant.skills.builtin.subagent_task.SubagentTaskSkill",
         ]
         for dotted_path in builtin_classes:
             module_path, class_name = dotted_path.rsplit(".", 1)

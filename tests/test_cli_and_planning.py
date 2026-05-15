@@ -188,3 +188,19 @@ def test_rag_hybrid_filters_and_citation_graph():
 
     with pytest.raises(ValueError):
         rag.search_papers("retrieval", retrieval_mode="unknown")
+
+
+def test_builtin_rag_search_skill_uses_context_rag():
+    registry = SkillRegistry()
+    SkillLoader(registry).load_builtin_skills()
+    rag = AcademicRAG()
+    rag.add_paper(
+        title="Local RAG Paper",
+        abstract="A local memory paper about retrieval agents.",
+        authors=["A. Researcher"],
+    )
+
+    result = registry.execute("rag_search", {"query": "retrieval agents", "top_k": 1}, {"rag": rag})
+
+    assert result["success"] is True
+    assert result["result"]["papers"][0]["title"] == "Local RAG Paper"

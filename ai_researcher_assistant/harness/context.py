@@ -18,3 +18,5 @@ class AgentContext(TypedDict, total=False):
     permission_policy: Any
     token_budget: Any
     cost_tracker: Any
+    subagent_runner: Any
+    subagent: str
