@@ -1,12 +1,24 @@
 ---
 name: custom-skill-name
 description: Describe what this skill does and when an agent should use it.
+parameters:
+  query:
+    type: string
+    required: true
+    description: Search query or task input.
+  top_k:
+    type: integer
+    required: false
+    default: 5
+    description: Maximum number of results to return.
+tags: [research]
 ---
 
 # Custom Skill Template
 
 Use this template to document a custom skill before or alongside its Python implementation.
 The same Markdown shape is compatible with Claude Code and Codex style skill files when saved as `SKILL.md`.
+The frontmatter parameter schema is read by `MarkdownSkill` and converted into `SkillParameter` entries.
 
 ## When To Use
 
@@ -38,6 +50,7 @@ Skills should return a structured result:
 - Do not mutate global state.
 - Do not read secrets from files directly; use configuration passed by the harness.
 - Keep network and filesystem behavior explicit and testable.
+- Markdown skill `scripts/` are resource references only; the harness does not execute them by default.
 
 ## Python Skeleton
 

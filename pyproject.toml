@@ -27,7 +27,13 @@ dependencies = [
     "pypdf>=4.0.0",
     "python-dotenv>=1.0.0",
     "pydantic>=2.0.0",
+    "pyyaml>=6.0",
+    "rich>=13.8,<14",
+    "typer>=0.12.0",
 ]
+
+[project.scripts]
+ai-researcher = "ai_researcher_assistant.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -38,6 +44,7 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
     "pre-commit>=3.0.0",
+    "build>=1.0.0",
     "types-requests",
 ]
 chromadb = ["chromadb>=0.5.0"]
@@ -55,6 +62,9 @@ Issues = "https://github.com/Git-cat000/AI-Researcher-Assistant/issues"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["ai_researcher_assistant*"]
+
+[tool.setuptools.package-data]
+ai_researcher_assistant = ["skills/templates/*.md"]
 
 [tool.ruff]
 line-length = 120

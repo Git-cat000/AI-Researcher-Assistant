@@ -7,7 +7,7 @@ enterprise endpoints through `base_url`.
 
 import os
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 from ai_researcher_assistant.core.exceptions import LLMError
 from ai_researcher_assistant.llm.base import BaseLLM, LLMResponse
@@ -44,7 +44,7 @@ class OpenAILLM(BaseLLM):
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=cast(Any, messages),
                 temperature=kwargs.get("temperature", self.temperature),
                 max_tokens=kwargs.get("max_tokens", self.max_tokens),
                 top_p=kwargs.get("top_p", 1.0),
@@ -58,7 +58,7 @@ class OpenAILLM(BaseLLM):
         try:
             response = await self.async_client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=cast(Any, messages),
                 temperature=kwargs.get("temperature", self.temperature),
                 max_tokens=kwargs.get("max_tokens", self.max_tokens),
                 top_p=kwargs.get("top_p", 1.0),
@@ -70,14 +70,17 @@ class OpenAILLM(BaseLLM):
 
     async def stream_generate(self, messages: list[dict[str, str]], **kwargs: Any) -> AsyncIterator[str]:
         try:
-            stream = await self.async_client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=kwargs.get("temperature", self.temperature),
-                max_tokens=kwargs.get("max_tokens", self.max_tokens),
-                top_p=kwargs.get("top_p", 1.0),
-                stop=kwargs.get("stop"),
-                stream=True,
+            stream = cast(
+                Any,
+                await self.async_client.chat.completions.create(
+                    model=self.model,
+                    messages=cast(Any, messages),
+                    temperature=kwargs.get("temperature", self.temperature),
+                    max_tokens=kwargs.get("max_tokens", self.max_tokens),
+                    top_p=kwargs.get("top_p", 1.0),
+                    stop=kwargs.get("stop"),
+                    stream=True,
+                ),
             )
             async for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:

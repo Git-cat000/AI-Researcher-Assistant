@@ -105,6 +105,8 @@ class ResearcherAgent(BaseAgent):
         self.short_term_memory.add(user_input, metadata={"role": "user"})
         context = self._build_context()
         self.execution_state = await self.loop.run(user_input, context)
+        if "cost_tracker" in context:
+            self.execution_state.metadata["cost"] = context["cost_tracker"].to_dict()
         answer = self.execution_state.final_answer or "Sorry, I couldn't complete the task."
         self.short_term_memory.add(answer, metadata={"role": "assistant"})
         return answer

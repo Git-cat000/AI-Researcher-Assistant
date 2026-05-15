@@ -1,4 +1,4 @@
-.PHONY: install format lint typecheck test test-cov all clean
+.PHONY: install format lint typecheck test test-cov compile check build cli all clean
 
 install:
 	pip install -e ".[dev]"
@@ -18,7 +18,19 @@ test:
 test-cov:
 	pytest tests/ -v --cov --cov-report=term-missing
 
-all: format lint typecheck test
+compile:
+	python -m compileall ai_researcher_assistant tests examples
+
+check:
+	python -m pip check
+
+build:
+	python -m build
+
+cli:
+	python -m ai_researcher_assistant.cli doctor --json
+
+all: format lint typecheck compile test check build
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

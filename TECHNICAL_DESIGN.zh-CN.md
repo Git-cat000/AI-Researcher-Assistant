@@ -1,299 +1,150 @@
 # AI Researcher Assistant 中文技术文档
 
-本文档说明 AI Researcher Assistant 当前的技术架构、每个模块的实现方式、核心数据流、扩展方式、质量门和后续技术规划。
+本文档说明 AI Researcher Assistant 当前架构、各模块实现方式、技术细节、质量门和后续技术规划。当前版本继续遵循 LLM + Harness 原则：
 
-## 1. 总体设计
+```text
+模型是 Agent，代码是 Harness。
+```
 
-项目采用 LLM + Harness 架构：
+模型负责推理、规划、选择工具和生成最终答案；Harness 负责提供稳定的执行契约、上下文、工具、记忆、权限、观察结果和预算控制。
+
+## 1. 总体架构
 
 ```text
 用户任务
-  -> ResearcherAgent
-  -> Harness / Orchestration
+  -> CLI 或 Python API
+  -> ResearcherAgent.aprocess()
+  -> AgentContext
+  -> Loop(ReAct / Plan-and-Execute / LLMCompiler)
   -> LLM 生成 Thought / Action / Final Answer
-  -> SkillRegistry 调用工具
-  -> Observation 回写上下文
+  -> Harness 解析 Action 并检查权限
+  -> SkillRegistry 调用 Skill
+  -> Observation 回写对话上下文
   -> LLM 生成最终答案
 ```
 
-核心边界：
-
-- LLM 负责推理、规划、选择工具和生成答案。
-- Harness 负责组织执行循环、解析模型输出、调用工具、收集观察结果。
-- Skill 是工具，不是 Agent，不应该私自调用 LLM。
-- Memory / RAG 负责存储和检索上下文，不负责决策。
-
-## 2. 包结构
+依赖方向：
 
 ```text
-ai_researcher_assistant/
-  core/
-  harness/
-  llm/
-  memory/
-  skills/
-  orchestration/
+orchestration -> llm
+orchestration -> skills
+orchestration -> memory
+orchestration -> harness
+skills 不调用 llm
+memory 不决定任务策略
+llm adapter 不写业务策略
 ```
 
-### 2.1 core/
+## 2. core/
 
-`core/` 存放稳定的数据契约和基础类型。
+`core/` 存放稳定基础类型。
 
-主要文件：
+- `config.py`：使用 dataclass 管理 Agent、LLM、Memory、Skills 配置。模块导入时不读取 `.env`、不创建目录、不初始化 SDK；`load_config_from_env()` 才显式读取环境变量。
+- `message.py`：定义 `MessageRole`、`Message`、`Conversation`，并提供粗粒度 token 估算和上下文窗口裁剪。
+- `exceptions.py`：统一内部异常体系，包括 `AgentError`、`LLMError`、`SkillError`、`MemoryError`、`ConfigurationError` 和 `SandboxError`。
+- `base_agent.py`：定义同步/异步 Agent 基类。
 
-- `config.py`
-- `message.py`
-- `exceptions.py`
-- `base_agent.py`
-
-#### config.py
-
-实现配置 dataclass：
-
-- `AgentConfig`
-- `LLMConfig`
-- `MemoryConfig`
-- `SkillsConfig`
-
-设计要点：
-
-- 配置是懒加载的。
-- 导入模块时不自动读取 `.env`。
-- 导入模块时不创建目录、不连接数据库、不初始化模型 SDK。
-- `load_config_from_env()` 显式读取 `.env`。
-- `get_config()` 仅保留为兼容默认配置入口。
-
-`LLMConfig.provider` 支持：
-
-```text
-openai, openai_compatible, azure_openai, deepseek,
-openrouter, siliconflow, qwen, anthropic, ollama, local
-```
-
-OpenAI-compatible provider 统一走 `OpenAILLM`，通过 `base_url` 接入。
-
-#### message.py
-
-实现对话消息结构：
-
-- `MessageRole`
-- `Message`
-- `Conversation`
-
-`Conversation.get_context_window()` 会把内部消息转换成模型 API 所需的：
-
-```python
-{"role": "user", "content": "..."}
-```
-
-token 裁剪已通过 `estimate_tokens()` 和 `truncate_to_token_budget()` 实现，采用 CJK 字符加权估算。
-
-#### exceptions.py
-
-统一异常体系：
-
-```text
-AgentError
-  LLMError
-  SkillError
-  MemoryError
-  ConfigurationError
-  SandboxError
-```
-
-所有 provider、memory、skill 的异常应该包装成项目内部异常，避免上层直接依赖第三方 SDK 的异常类型。
+设计要求：公共函数保持类型标注，配置和 provider 初始化必须延迟到实际使用阶段。
 
 ## 3. harness/
 
-`harness/` 是本轮重构新增模块，用来承载 Agent Harness 的稳定契约。
+`harness/` 是本轮优化的关键边界层，负责稳定契约而不是任务策略。
 
 ### 3.1 context.py
 
-定义 `AgentContext`：
+`AgentContext` 是 TypedDict 契约，记录循环和工具共享的上下文键：
 
-```python
-class AgentContext(TypedDict, total=False):
-    llm: Any
-    conversation: Any
-    short_term_memory: Any
-    rag: Any
-    config: Any
-    skill_registry: Any
-    execution_state: Any
-    plan_results: dict[str, Any]
-    state: Any
-```
+- `llm`
+- `conversation`
+- `short_term_memory`
+- `rag`
+- `config`
+- `skill_registry`
+- `execution_state`
+- `permission_policy`
+- `token_budget`
+- `cost_tracker`
 
-作用：
-
-- 明确执行循环和工具之间共享哪些上下文。
-- 作为 Harness 上下文的文档化契约。
-- 当前运行时仍使用普通 `dict[str, Any]`，避免 TypedDict 与可变上下文在类型系统中的兼容问题。
-- 为后续 schema 校验和更严格的 mypy 配置打基础。
+新增键必须在这里登记，避免散落的 `dict[str, Any]` 隐式协议继续扩散。
 
 ### 3.2 parsing.py
 
-集中解析 LLM 输出：
+集中解析模型输出：
 
 - `extract_json_block()`
 - `extract_action()`
 - `extract_thought()`
 - `extract_final_answer()`
 
-ReAct 输出通常形如：
+这样 ReAct、Plan-and-Execute 和图执行可以复用同一套边界规则，避免每个 loop 自己写脆弱的字符串处理。
 
-```text
-Thought: ...
-Action:
-```json
-{"skill": "paper_reader", "parameters": {"path": "..."}}
-```
-```
+### 3.3 schema.py
 
-解析逻辑从多个 loop 中抽离出来后，有两个好处：
+新增稳定 harness schema：
 
-- 不同执行循环复用同一套解析规则。
-- 可以用单元测试覆盖边界情况。
+- `Action`：规范化模型请求的 skill 调用，要求 `skill` 为非空字符串，`parameters` 为对象。
+- `Observation`：统一包装 Skill 执行结果，提供 `to_prompt(max_tokens=...)` 以便回写模型上下文。
+- `PermissionPolicy`：支持 allow/block skill 策略，并保留网络、文件系统和脚本执行权限字段。
+- `TokenBudget`：控制上下文和 Observation 的 token 预算。
+- `CostTracker`：累计模型调用次数和 token usage，并写回 `execution_state.metadata["cost"]`。
+
+当前 `BaseLoop` 已经通过这些契约执行 Action、截断 Observation、裁剪上下文并记录成本。
 
 ## 4. llm/
 
-`llm/` 是模型适配层，只负责把统一消息格式转换为不同模型服务商 API 调用。
+`llm/` 是模型适配层，只负责把统一消息格式转换为 provider API。
 
-### 4.1 base.py
+- `base.py`：定义 `BaseLLM` 和 `LLMResponse`。
+- `openai.py`：适配 OpenAI-compatible Chat Completions API，支持 OpenAI、Azure OpenAI、DeepSeek、OpenRouter、SiliconFlow、Qwen/DashScope 和本地兼容网关。新版 OpenAI SDK 的复杂消息类型通过内部 cast 收窄，保持项目公共接口简单。
+- `anthropic.py`：适配 Anthropic Messages API，延迟导入 SDK。
+- `local.py`：通过 HTTP 调用 Ollama `/api/chat`。
+- `factory.py`：根据 `LLMConfig.provider` 创建适配器，provider alias 在这里解析。
+- `capabilities.py`：记录 provider 能力元数据，包括是否支持本地模型、流式输出、OpenAI-compatible 路由和默认环境变量。
 
-定义统一接口：
+支持 provider：
 
-```python
-class BaseLLM:
-    def generate(...)
-    async def agenerate(...)
-    def stream_generate(...) -> AsyncIterator[str]
+```text
+openai, openai_compatible, azure_openai, deepseek, openrouter,
+siliconflow, qwen, anthropic, ollama, local
 ```
-
-返回结构为 `LLMResponse`：
-
-```python
-LLMResponse(
-    content="...",
-    model="...",
-    usage={...},
-    finish_reason="stop",
-    raw_response=...
-)
-```
-
-### 4.2 openai.py
-
-`OpenAILLM` 支持 OpenAI-compatible chat completion API。
-
-可接入：
-
-- OpenAI
-- Azure OpenAI
-- DeepSeek
-- OpenRouter
-- SiliconFlow
-- Qwen / DashScope OpenAI-compatible endpoint
-- 本地 OpenAI-compatible gateway
-
-实现方式：
-
-- SDK 在构造 `OpenAILLM` 时才导入。
-- 如果未安装 `openai`，抛出 `LLMError`。
-- 同步、异步、流式接口都转成 `LLMResponse` 或文本流。
-
-### 4.3 anthropic.py
-
-`AnthropicLLM` 适配 Claude Messages API。
-
-实现方式：
-
-- 将 OpenAI 风格 messages 转换为 Anthropic 所需格式。
-- system message 单独提取为 `system` 参数。
-- SDK 懒加载。
-- provider 异常包装为 `LLMError`。
-
-### 4.4 local.py
-
-`OllamaLLM` 通过 HTTP 调用本地 Ollama：
-
-- `/api/chat`
-- 支持同步请求。
-- 支持异步请求。
-- 支持 stream。
-
-本地模型通过 `OLLAMA_BASE_URL` 或 `LLMConfig.base_url` 配置。
-
-### 4.5 factory.py
-
-`create_llm()` 根据 `LLMConfig.provider` 创建具体适配器。
-
-设计重点：
-
-- provider alias 在 factory 层解析。
-- adapter 内不写任务逻辑。
-- 任务策略留给 orchestration / harness。
 
 ## 5. skills/
 
-`skills/` 是工具系统。
+`skills/` 是工具层。工具执行确定性工作或外部调用，并返回结构化结果：
+
+```python
+{"success": True, "result": {...}, "error": None}
+{"success": False, "result": None, "error": "message"}
+```
 
 ### 5.1 base.py
 
-核心类型：
+定义：
 
 - `SkillParameter`
 - `SkillManifest`
 - `BaseSkill`
 
-每个 Skill 必须实现：
-
-```python
-def _build_manifest(self) -> SkillManifest
-def execute(self, parameters, context) -> dict
-```
-
-标准返回：
-
-```python
-{"success": True, "result": {...}, "error": None}
-{"success": False, "result": None, "error": "错误信息"}
-```
+每个 Skill 必须实现 `_build_manifest()` 和 `execute()`。
 
 ### 5.2 registry.py
 
-`SkillRegistry` 管理工具注册和调用。
-
-本轮优化：
-
-- 从 `__new__` 单例改成普通实例。
-- 不同 Agent 可以拥有不同 registry。
-- 单元测试之间不会共享状态。
-- `get_skill_registry()` 仅作为兼容默认入口保留。
+`SkillRegistry` 现在是普通实例，不再是全局单例。这样不同 Agent 和不同测试可以隔离技能集合。
 
 ### 5.3 loader.py
 
 `SkillLoader` 支持：
 
-- 从 Python class 加载。
-- 从 Python module 加载。
-- 从目录加载。
-- 从 Markdown 文件加载。
+- 加载 Python class。
+- 加载 Python module。
+- 从目录递归发现 `**/SKILL.md`。
+- 加载目录根部 `SKILL.md`。
+- 加载 standalone `.md` Skill。
 - 加载内置技能。
-
-目录加载逻辑：
-
-1. 如果路径是 `.md` 文件，按 Markdown Skill 加载。
-2. 如果目录根部有 `SKILL.md`，加载该 Skill。
-3. 递归发现 `**/SKILL.md`。
-4. 加载目录根部 standalone `.md`。
-5. 加载 `.py` 中的 `BaseSkill` 子类。
 
 ### 5.4 markdown.py
 
-新增 `MarkdownSkill`，兼容 Claude Code 和 Codex 风格的 Skill 文件。
-
-支持结构：
+Markdown Skill 兼容 Claude Code 和 Codex 常见结构：
 
 ```text
 skill-name/
@@ -303,410 +154,254 @@ skill-name/
   assets/
 ```
 
-`SKILL.md` 示例：
-
-```markdown
----
-name: literature-review
-description: 当用户需要文献综述时使用。
-tags: [research, writing]
----
-
-# Literature Review
-
-请比较论文贡献、方法、证据和局限。
-```
-
 实现细节：
 
-- 解析 YAML frontmatter。
-- 如果安装了 `yaml`，使用 `yaml.safe_load()`。
-- 如果没有安装 `yaml`，使用内置的简单 YAML 子集解析器。
-- `name` 会标准化为 kebab-case。
-- `references/`、`scripts/`、`assets/` 会被发现并作为资源路径返回。
-- Markdown Skill 本身不执行脚本、不调用模型。
-
-执行结果示例：
-
-```python
-{
-    "success": True,
-    "result": {
-        "skill": "literature-review",
-        "description": "...",
-        "instructions": "...",
-        "frontmatter": {...},
-        "skill_file": ".../SKILL.md",
-        "skill_root": "...",
-        "resources": {
-            "references": [...],
-            "scripts": [...],
-            "assets": [...]
-        },
-        "requires_llm": True
-    },
-    "error": None
-}
-```
+- 使用 YAML frontmatter 解析 `name`、`description`、`tags`、`version`、`author`。
+- 支持 `parameters`、`params`、`input_schema`、`schema` 等常见参数声明形式。
+- 支持 JSON-schema-like `properties + required` 结构。
+- 自动发现 `references/`、`scripts/`、`assets/` 资源。
+- `read_resources` 或 `resource_paths` 只允许读取 skill 根目录下的非 `scripts/` 文件。
+- `scripts/` 默认只暴露路径，不执行。
+- Markdown Skill 返回说明和上下文给 Harness，由 Agent Loop 决定下一步是否调用 LLM。
 
 ## 6. memory/
 
-`memory/` 负责短期记忆、向量记忆和 RAG。
+`memory/` 负责短期记忆、向量记忆和论文 RAG。
 
-### 6.1 base.py
+### 6.1 short_term.py
 
-定义：
+`ShortTermMemory` 用 `deque` 保存最近对话，支持按消息数和粗粒度 token 数裁剪。
 
-- `MemoryItem`
-- `BaseMemory`
-- `BaseEmbedding`
+### 6.2 in_memory.py
 
-`BaseMemory` 统一接口：
+`HashEmbedding` 和 `InMemoryVectorMemory` 提供无外部依赖的本地检索能力：
 
-```python
-add()
-get()
-search()
-delete()
-clear()
-count()
-```
+- 文本分词。
+- hash 映射到固定维度。
+- 词频向量归一化。
+- cosine similarity 搜索。
+- metadata filter。
 
-### 6.2 short_term.py
+这让测试和本地 demo 不依赖 OpenAI Embedding 或 ChromaDB。
 
-`ShortTermMemory` 用 `deque` 保存最近对话。
+### 6.3 long_term.py
 
-功能：
+`LongTermMemory` 是 ChromaDB 持久化后端。`chromadb` 和 OpenAI embedding 相关 SDK 均延迟导入，基础安装不会强制拉取。
 
-- 按最大消息数裁剪。
-- 按粗略 token 数裁剪。
-- 提供 `get_context_for_llm()` 生成模型上下文。
+### 6.4 rag.py
 
-用途：
+`AcademicRAG` 是论文级 RAG 层。
 
-- 保存用户输入和助手回答。
-- 构造下一轮 LLM prompt。
+已实现能力：
 
-### 6.3 in_memory.py
+- `add_paper()`：按 arXiv ID 或标题生成 paper key，写入摘要 chunk 和全文 chunk。
+- `search_papers()`：聚合同一论文的 chunk，返回 paper-level 结果。
+- `build_context()`：生成紧凑论文上下文供 LLM 使用。
+- `delete_paper()`：按 arXiv ID 或标题删除论文。
+- `update_paper()`：用替换式写入更新论文内容和元数据。
+- `count_papers()`：按唯一 paper key 计数，不再按 chunk 数估算。
+- `citation_graph()`：从 `citations` 元数据生成节点和边。
+- `citation_neighbors()`：查询某篇论文的入边和出边。
 
-新增无依赖本地向量记忆：
+检索模式：
 
-- `HashEmbedding`
-- `InMemoryVectorMemory`
+- `vector`：只使用向量检索。
+- `keyword` / `bm25`：使用本地 BM25 风格词项评分。
+- `hybrid`：按 `vector_weight` 融合向量分数和 BM25 分数。
 
-`HashEmbedding` 实现方式：
+过滤能力：
 
-- 将文本分词。
-- 使用 Python hash 将 token 映射到固定维度。
-- 统计词频。
-- 做 L2 归一化。
-
-优点：
-
-- 不需要 OpenAI Embedding。
-- 不需要 ChromaDB。
-- 测试和本地 demo 可以直接运行。
-
-`InMemoryVectorMemory` 实现：
-
-- 内部用 `dict[str, MemoryItem]` 保存数据。
-- 添加时生成 embedding。
-- 搜索时计算 cosine similarity。
-- 支持 metadata filter。
-- 支持 `add_batch()`、`list()`、`delete_many()`。
-
-### 6.4 long_term.py
-
-`LongTermMemory` 是 ChromaDB 持久化后端。
-
-实现方式：
-
-- 构造时懒加载 `chromadb`。
-- 默认 embedding 是 `OpenAIEmbedding`。
-- 支持 add、batch add、search、delete、list、clear、count。
-
-适用场景：
-
-- 长期保存论文知识库。
-- 跨进程或跨会话复用向量库。
-
-### 6.5 rag.py
-
-`AcademicRAG` 是面向论文的 RAG 层。
-
-默认行为：
-
-- 使用 `InMemoryVectorMemory`。
-- 使用 `HashEmbedding`。
-- 不依赖外部服务。
-
-持久化行为：
-
-```python
-rag = AcademicRAG(prefer_persistent=True)
-```
-
-主要方法：
-
-- `add_paper()`
-- `search_papers()`
-- `build_context()`
-- `delete_paper()`
-- `count_papers()`
-
-`add_paper()` 实现：
-
-1. 根据 `arxiv_id` 或 title 生成 `paper_key`。
-2. 默认先删除已有同 key 论文，避免重复。
-3. 把 abstract 存为一个 chunk。
-4. 把 full text 按 `chunk_size` 和 `chunk_overlap` 切片。
-5. 写入 memory backend。
-
-`search_papers()` 实现：
-
-1. 调 memory.search。
-2. 根据 `paper_key` 聚合同一论文的 chunks。
-3. 区分 abstract 和 full_text chunk。
-4. 按最小 distance 排序。
-5. 返回 paper-level 结果，而不是裸 chunk 列表。
-
-`build_context()` 实现：
-
-1. 调 `search_papers()`。
-2. 格式化标题、作者、arXiv ID、分类、摘要。
-3. 可选加入全文片段。
-4. 按粗略 token 预算截断。
+- `categories`
+- `arxiv_id`
+- `authors`
+- `published_year`
+- `section`
+- `metadata_filter`
 
 ## 7. orchestration/
 
-`orchestration/` 负责把模型、工具、记忆组织成 Agent 执行流程。
+`orchestration/` 把模型、工具、记忆和 harness 契约组织成 Agent 执行流。
 
 ### 7.1 agent.py
 
-`ResearcherAgent` 是主入口。
+`ResearcherAgent` 是主入口。它支持：
 
-构造参数：
+- 注入 config。
+- 注入 mock LLM。
+- 注入独立 SkillRegistry。
+- 延迟初始化 RAG 和 LLM。
+- 同步 `process()` 与异步 `aprocess()`。
+- 执行后把 CostTracker 写入执行状态。
 
-- `config`
-- `name`
-- `llm`
-- `llm_factory`
-- `enable_rag`
-- `enable_builtin_skills`
-- `skill_registry`
-
-优化点：
-
-- 构造时不立刻创建 RAG。
-- 支持注入 mock LLM。
-- 支持注入独立 SkillRegistry。
-- `process()` 在已有 event loop 中会要求使用 `aprocess()`。
-- `_build_conversation()` 会避免 metadata 中的 `role` 重复传参。
+设计约束：如果当前线程已经有 event loop，调用者必须使用 `await aprocess()`。
 
 ### 7.2 loop.py
 
-包含三种执行循环：
+三种执行循环：
 
 - `ReActLoop`
 - `PlanAndExecuteLoop`
 - `LLMCompilerLoop`
 
-#### ReActLoop
+`BaseLoop` 现在负责共享机制：
 
-流程：
+- 初始化 conversation。
+- 统一调用 LLM。
+- 应用 TokenBudget。
+- 记录 CostTracker。
+- 统一执行 Action。
+- 统一执行 PermissionPolicy。
+- 统一格式化 Observation。
+- 统一错误处理和最终答案合成。
 
-```text
-Thought
-  -> Action JSON
-  -> Skill execution
-  -> Observation
-  -> 下一轮 Thought
-  -> Final Answer
-```
-
-关键实现：
-
-- 使用 `harness.parsing` 解析模型输出。
-- 如果模型输出包含 `Final Answer:`，会直接完成，不再继续请求模型。
-- Skill 执行通过 `SkillRegistry.aexecute()`。
-- Observation 会回写到 conversation。
-
-#### PlanAndExecuteLoop
-
-流程：
-
-1. LLM 生成 JSON plan。
-2. 逐步执行 plan 中的 skill。
-3. 收集每步结果。
-4. LLM 综合生成最终答案。
-
-适合结构化多步骤任务。
-
-#### LLMCompilerLoop
-
-流程：
-
-1. LLM 把任务拆成 DAG。
-2. 找出依赖已满足的子任务。
-3. 可并行执行独立 skill。
-4. 汇总 DAG 结果。
-
-适合多个互不依赖的检索或分析任务。
+这样任务策略仍然在 loop 中，Skill 不越界成为 Agent。
 
 ### 7.3 graph.py
 
-提供类 LangGraph 的状态图：
+提供轻量 LangGraph-like workflow graph。JSON 提取逻辑使用 `harness/parsing.py`，避免手写脆弱解析和裸 `except:`。
 
-- `StateGraph`
-- `CompiledGraph`
-- `AgentGraphBuilder`
-- `Node`
-- `Edge`
+### 7.4 middleware.py / state.py
 
-支持：
+`middleware.py` 提供生命周期 hook 和 telemetry；`state.py` 保存执行步骤、状态和元数据。
 
-- LLM node
-- Skill node
-- Function node
-- Conditional edge
-- Finish point
+## 8. CLI
 
-当前已修复：
+新增 `ai_researcher_assistant/cli.py`，并在 `pyproject.toml` 中注册：
 
-- JSON 解析不再使用裸 `except:`。
-- `json` 在模块层导入。
-
-### 7.4 middleware.py
-
-中间件 hook：
-
-- `before_think`
-- `after_think`
-- `before_act`
-- `after_act`
-- `on_error`
-
-内置：
-
-- `LoggingMiddleware`
-- `TelemetryMiddleware`
-
-用途：
-
-- 日志记录。
-- 统计执行步骤。
-- 未来可加入权限检查、token 预算、审计日志。
-
-### 7.5 state.py
-
-执行状态：
-
-- `ExecutionState`
-- `ExecutionStep`
-- `ExecutionStatus`
-
-记录内容：
-
-- 当前任务。
-- 当前步骤。
-- thought。
-- action。
-- observation。
-- error。
-- final answer。
-
-## 8. 端到端流程示例
-
-以 Markdown Skill 为例：
-
-```text
-用户: 规划一篇 RAG 文献综述
-  -> ResearcherAgent.aprocess()
-  -> ReActLoop 调用 LLM
-  -> LLM 输出 Action: literature-review
-  -> SkillRegistry 执行 MarkdownSkill
-  -> MarkdownSkill 返回 instructions + resources
-  -> ReActLoop 将 Observation 写入 Conversation
-  -> LLM 输出 Final Answer
+```toml
+[project.scripts]
+ai-researcher = "ai_researcher_assistant.cli:main"
 ```
 
-这个流程已经有测试覆盖：
+CLI 技术选型：
 
-```text
-tests/test_harness_refactor.py::test_agent_flow_with_markdown_skill
-```
+- 使用 Typer，因为它基于 Python 类型标注声明参数，适合项目当前的 typed API 风格。
+- Typer 底层基于 Click，继承成熟的命令解析、帮助页和子命令机制。
+- 使用 Python packaging 的 `[project.scripts]` 生成跨平台 console script。
 
-## 9. 测试体系
+命令结构：
+
+- `version`：输出版本。
+- `doctor`：检查本地内置 skill 和 provider 元数据。
+- `providers`：列出 provider 能力。
+- `ask`：运行一次 agent 任务。
+- `skills list`：列出内置和外部 skill。
+- `skills inspect`：解析单个 Markdown Skill。
+- `rag search`：从 JSONL 构建本地 RAG 并搜索。
+- `rag graph`：从 JSONL 构建引用图。
+
+CLI 边界：命令只做参数解析、输入加载和输出格式化，核心行为委托给 `ResearcherAgent`、`SkillLoader` 和 `AcademicRAG`。
+
+## 9. 工程化
+
+`pyproject.toml`：
+
+- 声明运行依赖：`openai`、`aiohttp`、`arxiv`、`pypdf`、`python-dotenv`、`pydantic`、`pyyaml`、`typer`、`rich`。
+- `chromadb`、`anthropic` 是 optional extras。
+- `dev` extra 包含 `pytest`、`ruff`、`mypy`、`pre-commit`、`build` 等。
+- 注册 CLI entry point。
+- 包含 Skill template package data。
+
+`Makefile`：
+
+- `install`
+- `format`
+- `lint`
+- `typecheck`
+- `compile`
+- `test`
+- `check`
+- `build`
+- `cli`
+- `all`
+
+GitHub Actions：
+
+- Python 3.10、3.11、3.12 matrix。
+- Ruff lint。
+- Ruff format check。
+- mypy。
+- compileall。
+- pytest coverage。
+- pip check。
+- package build。
+
+## 10. 测试
 
 当前测试覆盖：
 
-- 基础 memory 操作。
-- Conversation 格式化。
-- ReActLoop 初始化。
-- 配置加载。
-- 基础导入不依赖可选 provider SDK。
-- harness parsing。
-- SkillRegistry 隔离。
-- PaperWriterSkill 不直接调用 LLM。
-- Markdown Skill 加载。
-- 本地 RAG 添加、去重、检索、上下文构建。
-- Agent + Markdown Skill 端到端流程。
+- 短期记忆。
+- Conversation。
+- ReAct final answer。
+- ReAct skill action。
+- Config。
+- CLI version/providers。
+- CLI RAG JSONL search。
+- Markdown Skill schema、资源读取和脚本非执行策略。
+- Harness Action、PermissionPolicy、TokenBudget。
+- RAG hybrid filter 和 citation graph。
+- Optional SDK lazy import。
+- SkillRegistry 实例隔离。
+- PaperWriter 不内部调用 LLM。
+- Markdown Skill 与 Agent flow。
 
-本地验证命令：
-
-```bash
-python -m ruff check ai_researcher_assistant tests examples
-python -m mypy ai_researcher_assistant
-python -m compileall ai_researcher_assistant tests examples
-python -m pytest tests/ -v
-python -m pip check
-python -m build
-```
-
-当前结果：
+当前本地验证结果：
 
 ```text
-ruff: All checks passed
-mypy: Success, no issues found in 36 source files
-12 passed
-pip check: No broken requirements found
-build: wheel/sdist generated successfully
+python -m ruff check ai_researcher_assistant tests examples  # passed
+python -m mypy ai_researcher_assistant                       # passed
+python -m compileall ai_researcher_assistant tests examples  # passed
+python -m pytest tests/ -v                                   # 17 passed
+python -m pip check                                          # passed
+python -m build                                              # passed
+python -m ai_researcher_assistant.cli doctor --json          # passed
 ```
 
-## 10. 后续技术规划
+## 11. 已完成规划项
 
-### 10.1 Skill 系统
+- 修复 `builtin` 拼写，只保留正确目录。
+- 移除全局 SkillRegistry 单例。
+- Provider SDK 延迟导入。
+- ChromaDB 和 Anthropic 改为可选依赖。
+- RAG 默认可本地运行。
+- Markdown Skill 兼容 Claude Code / Codex。
+- Markdown Skill 支持参数 schema 和资源读取策略。
+- PaperWriter 不再内部调用 LLM。
+- `harness/schema.py` 实现 Action、Observation、权限、预算和成本契约。
+- 执行循环接入权限检查、Observation 截断、上下文预算和成本记录。
+- RAG 增加 hybrid/BM25 检索、过滤、rerank、update、citation graph。
+- 新增模型能力元数据。
+- 新增 Typer CLI 和 console script。
+- 补充 CLI、RAG、Skill、Harness 回归测试。
+- CI 增加 package build。
 
-- `skills/builtin/` 是唯一的内置技能入口，历史拼写错误目录已删除。✅
-- 支持 Markdown Skill 中声明参数 schema。✅
-- 支持 Markdown Skill 的资源按需读取策略。✅
-- 为 scripts 增加明确权限边界，默认不自动执行。✅ (PermissionPolicy)
+## 12. 后续技术规划
 
-### 10.2 RAG 系统
+优先级 P0：
 
-- 增加 BM25 + vector hybrid retrieval。
-- 支持 reranker。
-- 支持按论文、章节、年份、作者过滤。
-- 支持 citation graph。
-- 支持增量更新和删除。✅
+- 为每个内置 Skill 增加更严格的输入校验和错误路径测试。
+- 给 `PermissionPolicy` 增加按资源类型的细粒度规则，例如网络域名、文件路径前缀和只读/写入权限。
+- 将 `CostTracker` 扩展为按 provider/model 记录，并支持价格表外部配置。
 
-### 10.3 Harness
+优先级 P1：
 
-- 将 loop 中重复逻辑继续下沉到 `harness/`。✅ (BaseLoop 共享方法)
-- 定义标准 `Action` schema。✅ (harness/schema.py)
-- 定义标准 `Observation` schema。✅ (harness/schema.py)
-- 增加权限管理。✅ (PermissionPolicy)
-- 增加 token budget 和 cost tracking。✅ (TokenBudget, CostTracker)
+- 增加持久化 RAG 的集成测试，使用临时 ChromaDB 目录并跳过无依赖环境。
+- 增加 citation-aware rerank，把直接引用、共同引用和入边数量纳入排序信号。
+- 增加 CLI 导入 PDF/arXiv 的子命令，让本地知识库构建更完整。
+- 增加 `py.typed`，逐步提升 typed package 质量。
 
-### 10.4 模型层
+优先级 P2：
 
-- 将 provider extras 从主依赖中拆分。✅ (chromadb, anthropic 改为可选)
-- 增加更多本地 OpenAI-compatible server 示例。
-- 增加模型 capability 描述，例如是否支持 tool call、vision、long context。
+- 支持更多本地 OpenAI-compatible gateway 的配置示例。
+- 增加实验性评测 harness，用固定 mock LLM trace 回放 Agent 流程。
+- 增加文献综述模板、论文对比模板和引用检查模板。
+- 提供更完整的发布流程，例如版本号自动检查、changelog 和 release artifact 验证。
 
-### 10.5 工程质量
+## 13. 维护规则
 
-- 增加 CI。✅ (.github/workflows/ci.yml)
-- 增加 coverage。✅ (pytest-cov 已配置)
-- 提高 mypy 严格度，逐步为更多未标注函数开启 `check_untyped_defs`。
-- 补全 long_term memory 和 graph integration tests。
+- 新依赖必须更新 `pyproject.toml`、文档和测试。
+- 新 context key 必须更新 `harness/context.py`。
+- 新 Skill 不得调用 LLM。
+- 新 provider 只应出现在 `llm/` adapter、factory 和 capabilities 中。
+- 大范围结构调整前先确认公共 API 兼容性。
+- 提交前至少运行 `make all`。

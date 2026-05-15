@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
+from collections import Counter
 from typing import Any
 
 from ai_researcher_assistant.core.config import get_config
@@ -47,6 +49,7 @@ class AcademicRAG:
         arxiv_id: str | None = None,
         categories: list[str] | None = None,
         published_date: str | None = None,
+        citations: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         replace_existing: bool = True,
     ) -> list[str]:
@@ -64,6 +67,7 @@ class AcademicRAG:
             "paper_key": paper_key,
             "categories": categories or [],
             "published_date": published_date,
+            "citations": citations or (metadata or {}).get("citations", []),
             "type": "paper",
         }
 
@@ -93,18 +97,32 @@ class AcademicRAG:
         top_k: int = 5,
         categories: list[str] | None = None,
         arxiv_id: str | None = None,
+        authors: list[str] | None = None,
+        published_year: str | int | None = None,
+        section: str | None = None,
+        metadata_filter: dict[str, Any] | None = None,
+        retrieval_mode: str = "hybrid",
+        rerank: bool = True,
+        vector_weight: float = 0.7,
     ) -> list[dict[str, Any]]:
         """Search papers and aggregate matching chunks by paper."""
+
+        allowed_modes = {"hybrid", "vector", "keyword", "bm25"}
+        if retrieval_mode.lower() not in allowed_modes:
+            raise ValueError(f"retrieval_mode must be one of {sorted(allowed_modes)}")
 
         where = {"type": "paper"}
         if arxiv_id:
             where["arxiv_id"] = arxiv_id
+        if section:
+            where["section"] = section
 
-        results = self.memory.search(query, top_k=max(top_k * 5, top_k), where=where)
+        candidate_limit = max(top_k * 8, top_k)
+        results = self._hybrid_search_items(query, candidate_limit, where, retrieval_mode, vector_weight)
         papers: dict[str, dict[str, Any]] = {}
 
         for item in results:
-            if categories and not set(categories).intersection(set(item.metadata.get("categories", []))):
+            if not self._passes_filters(item.metadata, categories, authors, published_year, metadata_filter):
                 continue
 
             paper_key = (
@@ -120,12 +138,15 @@ class AcademicRAG:
                     "arxiv_id": item.metadata.get("arxiv_id"),
                     "categories": item.metadata.get("categories", []),
                     "published_date": item.metadata.get("published_date"),
+                    "citations": item.metadata.get("citations", []),
                     "chunks": [],
                     "abstract": None,
                     "score": item.metadata.get("_distance", 1.0),
+                    "relevance_score": item.metadata.get("_hybrid_score", 0.0),
                 },
             )
             paper["score"] = min(paper["score"], item.metadata.get("_distance", 1.0))
+            paper["relevance_score"] = max(paper["relevance_score"], item.metadata.get("_hybrid_score", 0.0))
 
             if item.metadata.get("section") == "abstract":
                 paper["abstract"] = item.content
@@ -134,11 +155,16 @@ class AcademicRAG:
                     {
                         "content": item.content,
                         "score": item.metadata.get("_distance", 1.0),
+                        "relevance_score": item.metadata.get("_hybrid_score", 0.0),
                         "chunk_index": item.metadata.get("chunk_index"),
                     }
                 )
 
-        sorted_papers = sorted(papers.values(), key=lambda paper: paper["score"])
+        if rerank:
+            for paper in papers.values():
+                paper["relevance_score"] += self._rerank_boost(query, paper)
+
+        sorted_papers = sorted(papers.values(), key=lambda paper: paper["relevance_score"], reverse=True)
         return sorted_papers[:top_k]
 
     def build_context(
@@ -183,6 +209,35 @@ class AcademicRAG:
                 deleted += 1
         return deleted
 
+    def update_paper(
+        self,
+        arxiv_id: str | None = None,
+        title: str | None = None,
+        abstract: str | None = None,
+        full_text: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        **fields: Any,
+    ) -> list[str]:
+        """Incrementally update one paper by replacing it with merged metadata and new content."""
+
+        existing = self.search_papers("", top_k=1, arxiv_id=arxiv_id) if arxiv_id else []
+        if not existing and title:
+            existing = [paper for paper in self.search_papers(title, top_k=5) if paper.get("title") == title]
+        current = existing[0] if existing else {}
+        merged_metadata = {**(metadata or {}), **fields}
+        return self.add_paper(
+            title=title or current.get("title") or "Untitled Paper",
+            abstract=abstract or current.get("abstract") or "",
+            full_text=full_text,
+            authors=fields.get("authors") or current.get("authors"),
+            arxiv_id=arxiv_id or current.get("arxiv_id"),
+            categories=fields.get("categories") or current.get("categories"),
+            published_date=fields.get("published_date") or current.get("published_date"),
+            citations=fields.get("citations") or current.get("citations"),
+            metadata=merged_metadata,
+            replace_existing=True,
+        )
+
     def count_papers(self) -> int:
         """Return a real unique paper count rather than a chunk estimate."""
 
@@ -194,6 +249,139 @@ class AcademicRAG:
                 or normalize_paper_key(item.metadata.get("title", ""))
             )
         return len(keys)
+
+    def citation_graph(self) -> dict[str, Any]:
+        """Return a simple citation graph from paper metadata."""
+
+        nodes: dict[str, dict[str, Any]] = {}
+        edges: list[dict[str, str]] = []
+        for item in self._list_items(where={"type": "paper", "section": "abstract"}):
+            source = item.metadata.get("arxiv_id") or item.metadata.get("paper_key")
+            if not source:
+                continue
+            nodes[source] = {
+                "id": source,
+                "title": item.metadata.get("title"),
+                "authors": item.metadata.get("authors", []),
+            }
+            for target in item.metadata.get("citations", []) or []:
+                target_id = str(target)
+                nodes.setdefault(target_id, {"id": target_id, "title": None, "authors": []})
+                edges.append({"source": source, "target": target_id})
+        return {"nodes": list(nodes.values()), "edges": edges}
+
+    def citation_neighbors(self, paper_id: str) -> dict[str, list[str]]:
+        graph = self.citation_graph()
+        outgoing = [edge["target"] for edge in graph["edges"] if edge["source"] == paper_id]
+        incoming = [edge["source"] for edge in graph["edges"] if edge["target"] == paper_id]
+        return {"outgoing": outgoing, "incoming": incoming}
+
+    def _hybrid_search_items(
+        self,
+        query: str,
+        top_k: int,
+        where: dict[str, Any],
+        retrieval_mode: str,
+        vector_weight: float,
+    ) -> list[MemoryItem]:
+        retrieval_mode = retrieval_mode.lower()
+        vector_weight = min(max(vector_weight, 0.0), 1.0)
+        candidates: dict[str, MemoryItem] = {}
+
+        if retrieval_mode in {"vector", "hybrid"}:
+            for item in self.memory.search(query, top_k=top_k, where=where):
+                vector_score = 1.0 - float(item.metadata.get("_distance", 1.0))
+                item.metadata["_vector_score"] = vector_score
+                item.metadata["_hybrid_score"] = max(0.0, vector_score) if retrieval_mode == "vector" else 0.0
+                candidates[item.id] = item
+
+        if retrieval_mode in {"keyword", "bm25", "hybrid"}:
+            lexical = self._lexical_search(query, top_k=top_k, where=where)
+            max_score = max((score for score, _ in lexical), default=1.0) or 1.0
+            for score, item in lexical:
+                normalized = score / max_score
+                existing = candidates.get(item.id)
+                if existing is None:
+                    item.metadata["_distance"] = 1.0
+                    item.metadata["_vector_score"] = 0.0
+                    existing = item
+                    candidates[item.id] = existing
+                existing.metadata["_bm25_score"] = normalized
+
+        for item in candidates.values():
+            vector_score = float(item.metadata.get("_vector_score", 0.0))
+            bm25_score = float(item.metadata.get("_bm25_score", 0.0))
+            if retrieval_mode == "hybrid":
+                item.metadata["_hybrid_score"] = vector_weight * vector_score + (1.0 - vector_weight) * bm25_score
+            elif retrieval_mode in {"keyword", "bm25"}:
+                item.metadata["_hybrid_score"] = bm25_score
+
+        return sorted(candidates.values(), key=lambda item: item.metadata.get("_hybrid_score", 0.0), reverse=True)[
+            :top_k
+        ]
+
+    def _lexical_search(self, query: str, top_k: int, where: dict[str, Any]) -> list[tuple[float, MemoryItem]]:
+        items = self._list_items(where=where)
+        query_terms = tokenize(query)
+        if not query_terms:
+            return [(0.0, item) for item in items[:top_k]]
+
+        documents = [tokenize(item.content) for item in items]
+        document_frequency = Counter(term for terms in documents for term in set(terms))
+        scored: list[tuple[float, MemoryItem]] = []
+        total_docs = max(len(items), 1)
+
+        for item, terms in zip(items, documents, strict=True):
+            counts = Counter(terms)
+            score = 0.0
+            for term in query_terms:
+                if not counts[term]:
+                    continue
+                idf = math.log((total_docs - document_frequency[term] + 0.5) / (document_frequency[term] + 0.5) + 1.0)
+                score += idf * (counts[term] / (counts[term] + 1.5))
+            if score > 0:
+                scored.append((score, item))
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return scored[:top_k]
+
+    def _passes_filters(
+        self,
+        metadata: dict[str, Any],
+        categories: list[str] | None,
+        authors: list[str] | None,
+        published_year: str | int | None,
+        metadata_filter: dict[str, Any] | None,
+    ) -> bool:
+        if categories and not set(categories).intersection(set(metadata.get("categories", []))):
+            return False
+        if authors:
+            paper_authors = {str(author).lower() for author in metadata.get("authors", [])}
+            if not any(author.lower() in paper_authors for author in authors):
+                return False
+        if published_year is not None and not str(metadata.get("published_date", "")).startswith(str(published_year)):
+            return False
+        if metadata_filter:
+            for key, expected in metadata_filter.items():
+                value = metadata.get(key)
+                if isinstance(value, list):
+                    if expected not in value:
+                        return False
+                elif value != expected:
+                    return False
+        return True
+
+    def _rerank_boost(self, query: str, paper: dict[str, Any]) -> float:
+        query_terms = set(tokenize(query))
+        title_terms = set(tokenize(paper.get("title") or ""))
+        abstract_terms = set(tokenize(paper.get("abstract") or ""))
+        boost = 0.0
+        if query_terms & title_terms:
+            boost += 0.2
+        if query_terms & abstract_terms:
+            boost += 0.1
+        if paper.get("arxiv_id") and paper["arxiv_id"].lower() in query.lower():
+            boost += 0.5
+        return boost
 
     def _chunk_text(self, text: str) -> list[str]:
         text = re.sub(r"\s+", " ", text).strip()
@@ -274,3 +462,7 @@ def normalize_paper_key(title: str) -> str:
     normalized = re.sub(r"\s+", "-", title.strip().lower())
     normalized = re.sub(r"[^a-z0-9\u4e00-\u9fff-]+", "", normalized)
     return normalized or "untitled-paper"
+
+
+def tokenize(text: str) -> list[str]:
+    return re.findall(r"[\w\u4e00-\u9fff]+", text.lower())

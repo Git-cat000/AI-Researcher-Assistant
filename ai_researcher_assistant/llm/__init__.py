@@ -5,6 +5,12 @@ contracts without installing every optional model provider.
 """
 
 from ai_researcher_assistant.llm.base import BaseLLM, LLMResponse
+from ai_researcher_assistant.llm.capabilities import (
+    MODEL_CAPABILITIES,
+    ModelCapability,
+    get_model_capability,
+    list_model_capabilities,
+)
 from ai_researcher_assistant.llm.factory import create_llm, get_llm
 
 
@@ -27,6 +33,10 @@ def __getattr__(name: str):
 __all__ = [
     "BaseLLM",
     "LLMResponse",
+    "ModelCapability",
+    "MODEL_CAPABILITIES",
+    "get_model_capability",
+    "list_model_capabilities",
     "OpenAILLM",
     "AnthropicLLM",
     "OllamaLLM",

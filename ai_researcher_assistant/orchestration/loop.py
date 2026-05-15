@@ -21,7 +21,14 @@ from ai_researcher_assistant.harness.parsing import (
     extract_json_block,
     extract_thought,
 )
-from ai_researcher_assistant.llm import BaseLLM
+from ai_researcher_assistant.harness.schema import (
+    Action,
+    Observation,
+    PermissionPolicy,
+    TokenBudget,
+    get_cost_tracker,
+)
+from ai_researcher_assistant.llm import BaseLLM, LLMResponse
 from ai_researcher_assistant.orchestration.middleware import MiddlewareManager
 from ai_researcher_assistant.orchestration.state import ExecutionState, ExecutionStatus, ExecutionStep
 from ai_researcher_assistant.skills.registry import SkillRegistry
@@ -98,7 +105,9 @@ You must reason step by step and use skills when necessary.
         await self.middleware.trigger_on_error(state, error, context)
         state.fail(str(error))
 
-    async def _synthesize_final_answer(self, task: str, summary_data: dict, conversation: Conversation) -> str:
+    async def _synthesize_final_answer(
+        self, task: str, summary_data: dict, conversation: Conversation, context: dict[str, Any]
+    ) -> str:
         """Prompt the LLM to synthesize a final answer from structured execution results."""
         prompt = f"""Based on the execution results for task: "{task}"
 
@@ -109,9 +118,23 @@ Please provide a comprehensive final answer to the user's original task.
 Include citations and references where appropriate."""
 
         conversation.add(MessageRole.USER, prompt)
-        messages = conversation.get_context_window()
-        response = await self.llm.agenerate(messages, temperature=0.0)
+        response = await self._call_llm(conversation, context, temperature=0.0)
         return response.content
+
+    async def _call_llm(
+        self, conversation: Conversation, context: dict[str, Any], temperature: float = 0.0
+    ) -> LLMResponse:
+        budget = TokenBudget.from_context(context)
+        messages = conversation.get_context_window(max_tokens=budget.max_context_tokens)
+        response = await self.llm.agenerate(messages, temperature=temperature)
+        get_cost_tracker(context).add_response(response)
+        return response
+
+    async def _execute_action(self, action: Action, context: dict[str, Any]) -> dict[str, Any]:
+        allowed, reason = PermissionPolicy.from_context(context).check_action(action)
+        if not allowed:
+            return {"success": False, "result": None, "error": reason or "Action blocked by permission policy"}
+        return await self._execute_skill(action.skill, action.parameters, context)
 
     async def _execute_skill(
         self, skill_name: str, parameters: dict[str, Any], context: dict[str, Any]
@@ -215,24 +238,29 @@ Important rules:
                 state.status = ExecutionStatus.ACTING
 
                 # 2. Act 阶段
-                await self.middleware.trigger_before_act(state, action, context)
-                result = await self._execute_skill(action["skill"], action.get("parameters", {}), context)
+                action_model = Action.from_mapping(action, thought=thought)
+                await self.middleware.trigger_before_act(state, action_model.to_dict(), context)
+                result = await self._execute_action(action_model, context)
                 await self.middleware.trigger_after_act(state, result, context)
 
-                observation = self._format_observation(action["skill"], result)
-                step.observation = observation
+                observation = Observation.from_skill_result(
+                    action_model.skill,
+                    result,
+                    self._format_observation(action_model.skill, result),
+                )
+                step.observation = observation.to_prompt(TokenBudget.from_context(context).max_observation_tokens)
                 state.add_step(step)
                 state.status = ExecutionStatus.OBSERVING
 
                 conversation.add(MessageRole.ASSISTANT, f"Thought: {thought}\nAction: {json.dumps(action)}")
-                conversation.add(MessageRole.OBSERVATION, f"Observation: {observation}")
+                conversation.add(MessageRole.OBSERVATION, f"Observation: {step.observation}")
 
                 if not result.get("success") and self._should_abort(state):
                     state.fail("Too many skill failures")
                     break
 
             if state.status not in [ExecutionStatus.COMPLETED, ExecutionStatus.FAILED]:
-                final = await self._force_final_answer(conversation)
+                final = await self._force_final_answer(conversation, context)
                 state.complete(final)
 
         except Exception as e:
@@ -244,8 +272,7 @@ Important rules:
         self, conversation: Conversation, state: ExecutionState, context: dict[str, Any]
     ) -> tuple[str, dict[str, Any] | None]:
         """调用 LLM 进行思考"""
-        messages = conversation.get_context_window()
-        response = await self.llm.agenerate(messages, temperature=self.config.temperature)
+        response = await self._call_llm(conversation, context, temperature=self.config.temperature)
         content = response.content
 
         thought = extract_thought(content)
@@ -256,11 +283,10 @@ Important rules:
 
         return thought, action
 
-    async def _force_final_answer(self, conversation: Conversation) -> str:
+    async def _force_final_answer(self, conversation: Conversation, context: dict[str, Any]) -> str:
         """强制 LLM 输出最终答案"""
         conversation.add(MessageRole.USER, "You have reached the step limit. Please provide your final answer now.")
-        messages = conversation.get_context_window()
-        response = await self.llm.agenerate(messages, temperature=0.0)
+        response = await self._call_llm(conversation, context, temperature=0.0)
         return response.content
 
     def _should_abort(self, state: ExecutionState) -> bool:
@@ -320,7 +346,7 @@ Example:
 
         try:
             conversation.add(MessageRole.USER, "Create a plan:")
-            plan = await self._generate_plan(conversation)
+            plan = await self._generate_plan(conversation, context)
             if not plan:
                 state.fail("Failed to generate a valid plan")
                 return state
@@ -344,7 +370,7 @@ Example:
                     await self.middleware.trigger_before_act(
                         state, {"skill": skill_name, "parameters": parameters}, context
                     )
-                    result = await self._execute_skill(skill_name, parameters, context)
+                    result = await self._execute_action(Action(skill=skill_name, parameters=parameters), context)
                     await self.middleware.trigger_after_act(state, result, context)
 
                     observation = self._format_observation(skill_name, result)
@@ -363,7 +389,9 @@ Example:
 
                 context["plan_results"] = results
 
-            final_answer = await self._synthesize_final_answer(task, {"plan": plan, "results": results}, conversation)
+            final_answer = await self._synthesize_final_answer(
+                task, {"plan": plan, "results": results}, conversation, context
+            )
             state.complete(final_answer)
 
         except Exception as e:
@@ -371,10 +399,9 @@ Example:
 
         return state
 
-    async def _generate_plan(self, conversation: Conversation) -> list[dict[str, Any]] | None:
+    async def _generate_plan(self, conversation: Conversation, context: dict[str, Any]) -> list[dict[str, Any]] | None:
         """生成执行计划"""
-        messages = conversation.get_context_window()
-        response = await self.llm.agenerate(messages, temperature=0.0)
+        response = await self._call_llm(conversation, context, temperature=0.0)
 
         parsed = extract_json_block(response.content)
         return parsed if isinstance(parsed, list) else None
@@ -397,7 +424,7 @@ class LLMCompilerLoop(BaseLoop):
             results = await self._execute_dag(dag, state, context)
 
             conversation = self._init_conversation(task, context)
-            final = await self._synthesize_final_answer(task, {"dag": dag, "results": results}, conversation)
+            final = await self._synthesize_final_answer(task, {"dag": dag, "results": results}, conversation, context)
             state.complete(final)
 
         except Exception as e:
@@ -439,7 +466,9 @@ Example:
   "parallel_groups": [["1", "2"]]
 }}
 """
-        response = await self.llm.agenerate([{"role": "user", "content": prompt}], temperature=0.0)
+        conversation = Conversation()
+        conversation.add(MessageRole.USER, prompt)
+        response = await self._call_llm(conversation, context, temperature=0.0)
         parsed = extract_json_block(response.content)
         return parsed if isinstance(parsed, dict) else {"subtasks": [], "parallel_groups": []}
 
@@ -467,7 +496,9 @@ Example:
             # 并行执行
             async def exec_one(tid: str, task: dict[str, Any]) -> tuple[str, dict[str, Any]]:
                 if task.get("skill"):
-                    result = await self._execute_skill(task["skill"], task.get("parameters", {}), context)
+                    result = await self._execute_action(
+                        Action(skill=task["skill"], parameters=task.get("parameters", {})), context
+                    )
                     return tid, result
                 else:
                     return tid, {"success": True, "result": task.get("description")}

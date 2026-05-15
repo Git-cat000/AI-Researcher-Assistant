@@ -15,3 +15,6 @@ class AgentContext(TypedDict, total=False):
     execution_state: Any
     plan_results: dict[str, Any]
     state: Any
+    permission_policy: Any
+    token_budget: Any
+    cost_tracker: Any

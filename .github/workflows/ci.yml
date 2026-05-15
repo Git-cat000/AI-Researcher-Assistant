@@ -41,3 +41,6 @@ jobs:
 
       - name: Dependency check
         run: python -m pip check
+
+      - name: Build package
+        run: python -m build
