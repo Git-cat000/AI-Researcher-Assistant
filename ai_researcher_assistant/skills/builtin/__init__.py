@@ -18,6 +18,10 @@ def __getattr__(name: str):
         from ai_researcher_assistant.skills.builtin.paper_writer import PaperWriterSkill
 
         return PaperWriterSkill
+    if name == "HarnessCoordinationSkill":
+        from ai_researcher_assistant.skills.builtin.harness_coordination import HarnessCoordinationSkill
+
+        return HarnessCoordinationSkill
     if name == "RagSearchSkill":
         from ai_researcher_assistant.skills.builtin.rag_search import RagSearchSkill
 
@@ -33,6 +37,7 @@ __all__ = [
     "ArxivFetcherSkill",
     "PaperReaderSkill",
     "PaperWriterSkill",
+    "HarnessCoordinationSkill",
     "RagSearchSkill",
     "SubagentTaskSkill",
 ]

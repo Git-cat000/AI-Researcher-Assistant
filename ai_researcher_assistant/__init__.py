@@ -26,6 +26,16 @@ from ai_researcher_assistant.core import (
     load_config_from_env,
     update_config,
 )
+from ai_researcher_assistant.harness import (
+    ContextCompactor,
+    ProtocolRequest,
+    ProtocolStore,
+    TaskBoard,
+    TaskRecord,
+    TeamMailbox,
+    TeamMessage,
+    WorktreeIndex,
+)
 from ai_researcher_assistant.llm import (
     AnthropicLLM,
     BaseLLM,
@@ -102,6 +112,14 @@ __all__ = [
     "OllamaLLM",
     "create_llm",
     "get_llm",
+    "TaskBoard",
+    "TaskRecord",
+    "TeamMailbox",
+    "TeamMessage",
+    "ProtocolStore",
+    "ProtocolRequest",
+    "WorktreeIndex",
+    "ContextCompactor",
     "BaseMemory",
     "BaseEmbedding",
     "HashEmbedding",

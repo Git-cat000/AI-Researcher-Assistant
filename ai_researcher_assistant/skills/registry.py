@@ -51,6 +51,25 @@ class SkillRegistry:
             return "No skills available."
         return "\n\n".join(skill.get_instructions_for_llm() for skill in self._skills.values())
 
+    def get_catalog_for_all(self) -> str:
+        """Return a compact skill catalog for prompt-efficient planning."""
+
+        if not self._skills:
+            return "No skills available."
+        lines = []
+        for skill in self._skills.values():
+            manifest = skill.manifest
+            required = [param.name for param in manifest.parameters if param.required]
+            optional = [param.name for param in manifest.parameters if not param.required]
+            suffix = []
+            if required:
+                suffix.append(f"required={required}")
+            if optional:
+                suffix.append(f"optional={optional}")
+            params = f" ({'; '.join(suffix)})" if suffix else ""
+            lines.append(f"- {manifest.name}: {manifest.description}{params}")
+        return "\n".join(lines)
+
     def execute(self, skill_name: str, parameters: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         skill = self.get(skill_name)
         if skill is None:

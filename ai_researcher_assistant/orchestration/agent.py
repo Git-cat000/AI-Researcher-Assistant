@@ -8,6 +8,7 @@ from typing import Any
 from ai_researcher_assistant.core.base_agent import BaseAgent
 from ai_researcher_assistant.core.config import AgentConfig
 from ai_researcher_assistant.core.message import Conversation
+from ai_researcher_assistant.harness.coordination import ContextCompactor
 from ai_researcher_assistant.llm import BaseLLM, create_llm
 from ai_researcher_assistant.memory import AcademicRAG, ShortTermMemory
 from ai_researcher_assistant.orchestration.loop import ReActLoop
@@ -174,6 +175,16 @@ class ResearcherAgent(BaseAgent):
         if self.execution_state:
             return [step.to_dict() for step in self.execution_state.steps]
         return []
+
+    def get_compacted_execution_history(
+        self,
+        keep_recent: int = 3,
+        max_observation_chars: int = 600,
+    ) -> list[dict[str, Any]]:
+        if not self.execution_state:
+            return []
+        compactor = ContextCompactor(keep_recent=keep_recent, max_observation_chars=max_observation_chars)
+        return compactor.compact_steps(self.execution_state.steps)
 
     def get_stats(self) -> dict[str, Any]:
         stats = {

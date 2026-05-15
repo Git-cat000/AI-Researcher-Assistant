@@ -1,9 +1,9 @@
 """
-执行循环模块。
-实现多种 Agent 执行模式：
-- ReActLoop: 经典的 Reason-Act-Observe 循环
-- PlanAndExecuteLoop: 先规划后执行的模式
-- LLMCompiler: 并行执行独立任务的模式
+鎵ц寰幆妯″潡銆?
+瀹炵幇澶氱 Agent 鎵ц妯″紡锛?
+- ReActLoop: 缁忓吀鐨?Reason-Act-Observe 寰幆
+- PlanAndExecuteLoop: 鍏堣鍒掑悗鎵ц鐨勬ā寮?
+- LLMCompiler: 骞惰鎵ц鐙珛浠诲姟鐨勬ā寮?
 """
 
 import asyncio
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 class LoopType(str, Enum):
-    """执行循环类型"""
+    """鎵ц寰幆绫诲瀷"""
 
     REACT = "react"
     PLAN_EXECUTE = "plan_execute"
@@ -46,7 +46,7 @@ class LoopType(str, Enum):
 
 @dataclass
 class LoopConfig:
-    """执行循环配置"""
+    """鎵ц寰幆閰嶇疆"""
 
     loop_type: LoopType = LoopType.REACT
     max_steps: int = 20
@@ -58,7 +58,7 @@ class LoopConfig:
 
 
 class BaseLoop(ABC):
-    """执行循环抽象基类"""
+    """鎵ц寰幆鎶借薄鍩虹被"""
 
     def __init__(
         self,
@@ -82,12 +82,12 @@ You must reason step by step and use skills when necessary.
 
     @abstractmethod
     async def run(self, task: str, context: dict[str, Any]) -> ExecutionState:
-        """运行执行循环"""
+        """杩愯鎵ц寰幆"""
         pass
 
     def build_system_prompt(self) -> str:
-        """构建系统提示词"""
-        skill_instructions = self.skill_registry.get_instructions_for_all()
+        """Build the system prompt."""
+        skill_instructions = self.skill_registry.get_catalog_for_all()
         return self.base_system_prompt.format(skill_instructions=skill_instructions)
 
     def _init_conversation(self, task: str, context: dict[str, Any], task_prefix: str = "") -> Conversation:
@@ -139,7 +139,7 @@ Include citations and references where appropriate."""
     async def _execute_skill(
         self, skill_name: str, parameters: dict[str, Any], context: dict[str, Any]
     ) -> dict[str, Any]:
-        """执行单个技能（带重试）"""
+        """鎵ц鍗曚釜鎶€鑳斤紙甯﹂噸璇曪級"""
         for attempt in range(self.config.max_retries):
             try:
                 result = await self.skill_registry.aexecute(skill_name, parameters, context)
@@ -152,7 +152,7 @@ Include citations and references where appropriate."""
         return {"success": False, "error": "Max retries exceeded"}
 
     def _format_observation(self, skill_name: str, result: dict[str, Any]) -> str:
-        """格式化技能执行结果为观察文本"""
+        """鏍煎紡鍖栨妧鑳芥墽琛岀粨鏋滀负瑙傚療鏂囨湰"""
         if result.get("success"):
             data = result.get("result", {})
             if skill_name == "arxiv_fetcher" and "papers" in data:
@@ -171,8 +171,8 @@ Include citations and references where appropriate."""
 
 class ReActLoop(BaseLoop):
     """
-    ReAct 执行循环。
-    实现经典的 Reason-Act-Observe 循环。
+    ReAct 鎵ц寰幆銆?
+    瀹炵幇缁忓吀鐨?Reason-Act-Observe 寰幆銆?
     """
 
     def __init__(self, *args, **kwargs):
@@ -205,11 +205,11 @@ Important rules:
 """
 
     def build_system_prompt(self) -> str:
-        skill_instructions = self.skill_registry.get_instructions_for_all()
+        skill_instructions = self.skill_registry.get_catalog_for_all()
         return self.base_system_prompt.format(skill_instructions=skill_instructions) + "\n" + self.react_system_prompt
 
     async def run(self, task: str, context: dict[str, Any]) -> ExecutionState:
-        """运行 ReAct 循环"""
+        """杩愯 ReAct 寰幆"""
         state = ExecutionState(max_steps=self.config.max_steps)
         state.start_task(task)
 
@@ -217,7 +217,7 @@ Important rules:
 
         try:
             while state.current_step < state.max_steps:
-                # 1. Think 阶段
+                # 1. Think 闃舵
                 await self.middleware.trigger_before_think(state, context)
                 thought, action = await self._think(conversation, state, context)
                 await self.middleware.trigger_after_think(state, thought, context)
@@ -237,7 +237,7 @@ Important rules:
                 step.action = action
                 state.status = ExecutionStatus.ACTING
 
-                # 2. Act 阶段
+                # 2. Act 闃舵
                 action_model = Action.from_mapping(action, thought=thought)
                 await self.middleware.trigger_before_act(state, action_model.to_dict(), context)
                 result = await self._execute_action(action_model, context)
@@ -271,7 +271,7 @@ Important rules:
     async def _think(
         self, conversation: Conversation, state: ExecutionState, context: dict[str, Any]
     ) -> tuple[str, dict[str, Any] | None]:
-        """调用 LLM 进行思考"""
+        """Call the LLM for the next ReAct thought/action."""
         response = await self._call_llm(conversation, context, temperature=self.config.temperature)
         content = response.content
 
@@ -284,13 +284,13 @@ Important rules:
         return thought, action
 
     async def _force_final_answer(self, conversation: Conversation, context: dict[str, Any]) -> str:
-        """强制 LLM 输出最终答案"""
+        """Ask the LLM to produce a final answer at the step limit."""
         conversation.add(MessageRole.USER, "You have reached the step limit. Please provide your final answer now.")
         response = await self._call_llm(conversation, context, temperature=0.0)
         return response.content
 
     def _should_abort(self, state: ExecutionState) -> bool:
-        """判断是否应该中止（例如连续失败）"""
+        """鍒ゆ柇鏄惁搴旇涓锛堜緥濡傝繛缁け璐ワ級"""
         if len(state.steps) < 3:
             return False
         recent = state.steps[-3:]
@@ -300,8 +300,8 @@ Important rules:
 
 class PlanAndExecuteLoop(BaseLoop):
     """
-    先规划后执行模式。
-    首先让 LLM 制定完整计划，然后按顺序执行各步骤。
+    鍏堣鍒掑悗鎵ц妯″紡銆?
+    棣栧厛璁?LLM 鍒跺畾瀹屾暣璁″垝锛岀劧鍚庢寜椤哄簭鎵ц鍚勬楠ゃ€?
     """
 
     def __init__(self, *args, **kwargs):
@@ -335,7 +335,7 @@ Example:
 """
 
     def build_system_prompt(self) -> str:
-        skill_instructions = self.skill_registry.get_instructions_for_all()
+        skill_instructions = self.skill_registry.get_catalog_for_all()
         return self.base_system_prompt.format(skill_instructions=skill_instructions) + "\n" + self.plan_system_prompt
 
     async def run(self, task: str, context: dict[str, Any]) -> ExecutionState:
@@ -400,7 +400,7 @@ Example:
         return state
 
     async def _generate_plan(self, conversation: Conversation, context: dict[str, Any]) -> list[dict[str, Any]] | None:
-        """生成执行计划"""
+        """鐢熸垚鎵ц璁″垝"""
         response = await self._call_llm(conversation, context, temperature=0.0)
 
         parsed = extract_json_block(response.content)
@@ -409,8 +409,8 @@ Example:
 
 class LLMCompilerLoop(BaseLoop):
     """
-    LLM Compiler 模式。
-    借鉴 LLMCompiler 论文思想，先识别可并行执行的独立任务，然后并行调用技能。
+    LLM Compiler 妯″紡銆?
+    鍊熼壌 LLMCompiler 璁烘枃鎬濇兂锛屽厛璇嗗埆鍙苟琛屾墽琛岀殑鐙珛浠诲姟锛岀劧鍚庡苟琛岃皟鐢ㄦ妧鑳姐€?
     """
 
     async def run(self, task: str, context: dict[str, Any]) -> ExecutionState:
@@ -433,7 +433,7 @@ class LLMCompilerLoop(BaseLoop):
         return state
 
     async def _parse_dag(self, task: str, context: dict[str, Any]) -> dict[str, Any]:
-        """解析任务生成依赖图"""
+        """Parse a task into an executable dependency graph."""
         prompt = f"""Analyze the following task.
 Break it into independent subtasks that can be executed in parallel where possible.
 
@@ -473,14 +473,14 @@ Example:
         return parsed if isinstance(parsed, dict) else {"subtasks": [], "parallel_groups": []}
 
     async def _execute_dag(self, dag: dict[str, Any], state: ExecutionState, context: dict[str, Any]) -> dict[str, Any]:
-        """执行 DAG"""
+        """鎵ц DAG"""
         subtasks = {t["id"]: t for t in dag.get("subtasks", [])}
         completed: set[str] = set()
         results: dict[str, Any] = {}
         step_counter = 0
 
         while len(completed) < len(subtasks):
-            # 找出所有依赖已满足且未执行的子任务
+            # 鎵惧嚭鎵€鏈変緷璧栧凡婊¤冻涓旀湭鎵ц鐨勫瓙浠诲姟
             ready: list[tuple[str, dict[str, Any]]] = []
             for tid, task in subtasks.items():
                 if tid in completed:
@@ -490,10 +490,10 @@ Example:
                     ready.append((tid, task))
 
             if not ready:
-                # 死锁或无任务
+                # 姝婚攣鎴栨棤浠诲姟
                 break
 
-            # 并行执行
+            # 骞惰鎵ц
             async def exec_one(tid: str, task: dict[str, Any]) -> tuple[str, dict[str, Any]]:
                 if task.get("skill"):
                     result = await self._execute_action(
@@ -531,7 +531,7 @@ def create_loop(
     middleware_manager: MiddlewareManager | None = None,
     config: LoopConfig | None = None,
 ) -> BaseLoop:
-    """工厂函数：根据类型创建执行循环实例"""
+    """Create an execution loop instance by type."""
     if isinstance(loop_type, str):
         loop_type = LoopType(loop_type)
 

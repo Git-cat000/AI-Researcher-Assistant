@@ -39,6 +39,20 @@ llm adapter 不写业务策略
 cli 不写 Agent 策略
 ```
 
+本轮参考 `learn-claude-code` s04-s12 后，项目采用的迁移原则是：把协作机制落在 Harness 控制面，而不是让工具或模型适配器承担策略。对应关系如下：
+
+```text
+s04 子 Agent 隔离       -> SubagentRunner + subagent_task
+s05 按需 Skill 知识     -> compact skill catalog + Markdown Skill observation
+s06 上下文压缩          -> ContextCompactor
+s07 持久任务图          -> TaskBoard
+s08 后台通知思想        -> JSON/JSONL 控制面可被后续后台执行器注入
+s09 团队邮箱            -> TeamMailbox
+s10 请求响应协议        -> ProtocolStore
+s11 自主认领            -> TaskBoard.claim_next()
+s12 worktree 隔离绑定   -> WorktreeIndex
+```
+
 ## 2. core/
 
 `core/` 存放稳定基础类型。
@@ -53,6 +67,7 @@ cli 不写 Agent 策略
 `harness/` 负责稳定契约而不是任务策略。
 
 - `context.py`：定义 `AgentContext`，登记 loop、tools、memory、graph 共享的上下文键。
+- `coordination.py`：实现持久任务图、团队邮箱、请求响应协议、worktree 绑定索引和确定性上下文压缩。
 - `parsing.py`：集中解析 LLM 输出，包括 JSON block、Action、Thought 和 Final Answer。
 - `schema.py`：定义 `Action`、`Observation`、`PermissionPolicy`、`TokenBudget`、`CostTracker`。
 
@@ -106,6 +121,7 @@ siliconflow, qwen, anthropic, ollama, local
 - `markdown.py`：兼容 Claude Code / Codex 风格 Markdown Skill。
 - `builtin/rag_search.py`：把当前 `AcademicRAG` 暴露为确定性检索 Skill。
 - `builtin/subagent_task.py`：把本地子 Agent 委托暴露为异步 Skill。
+- `builtin/harness_coordination.py`：把任务图、邮箱、协议和 worktree 绑定暴露为一个统一的确定性控制面 Skill。
 
 Markdown Skill 支持：
 
@@ -115,6 +131,8 @@ Markdown Skill 支持：
 - `references/`、`scripts/`、`assets/` 资源发现。
 - `read_resources` / `resource_paths` 读取非 `scripts/` 文件。
 - `scripts/` 默认只暴露路径，不执行。
+
+当前系统提示词使用 `SkillRegistry.get_catalog_for_all()` 输出轻量 Skill catalog，而不是把所有 Skill 的详细说明全部塞入每轮 system prompt。这样更接近 s05 的“双层加载”思想：模型先知道有哪些工具，真正需要时再通过 action/observation 获取完整资源或执行结果。
 
 ## 6. memory/
 
@@ -198,7 +216,69 @@ writing_agent            -> paper_writer, rag_search
 - 返回给父 Agent 的 observation 是 `SubagentResult.to_dict()`，包含 summary、允许使用的 skill、步数和错误信息。
 - 当前实现是本地进程内子 Agent，不依赖 MCP 或 A2A。后续如果接入远程协议，应保留相同的 summary-only 返回契约。
 
-## 9. CLI
+## 9. 协调控制面
+
+`harness/coordination.py` 提供本地文件控制面，默认根目录为 `.ai-researcher/`。它不调用 LLM，也不执行危险 git 操作，只维护可恢复的状态。
+
+### 9.1 TaskBoard
+
+`TaskBoard` 使用 `task_<id>.json` 保存每个任务：
+
+```json
+{
+  "id": 1,
+  "subject": "Read local PDFs",
+  "status": "pending",
+  "blocked_by": [],
+  "owner": "",
+  "worktree": ""
+}
+```
+
+关键能力：
+
+- `create()` 创建持久任务。
+- `update(..., status="completed")` 会自动从其他任务的 `blocked_by` 中清除已完成任务。
+- `ready_tasks()` 返回未阻塞的 pending task。
+- `claim_next(owner)` 支持 s11 风格的自主认领。
+
+### 9.2 TeamMailbox
+
+`TeamMailbox` 使用 append-only JSONL 收件箱：
+
+```text
+.ai-researcher/team/inbox/writer.jsonl
+```
+
+每条消息包含 sender、recipient、message_type、request_id、content 和 timestamp。`read(..., drain=True)` 支持读取后清空，适合 agent loop 在每轮推理前注入 inbox。
+
+### 9.3 ProtocolStore
+
+`ProtocolStore` 实现统一请求响应 FSM：
+
+```text
+pending -> approved
+pending -> rejected
+```
+
+可用于计划审批、关停握手、任务移交等场景。所有请求保存在 `.ai-researcher/team/protocols.json`，每个请求都有稳定 `request_id`。
+
+### 9.4 WorktreeIndex
+
+`WorktreeIndex` 记录任务与隔离目录的绑定：
+
+```text
+.ai-researcher/worktrees/index.json
+.ai-researcher/worktrees/events.jsonl
+```
+
+它会把 `task_id`、worktree name、path、status 写入索引，并向事件流追加 lifecycle event。当前实现只记录隔离意图，不直接调用 `git worktree add/remove`；后续可以在 PermissionPolicy 下增加显式 git 执行器。
+
+### 9.5 ContextCompactor
+
+`ContextCompactor` 为执行历史提供确定性 micro-compact：保留最近若干 observation，旧的大 observation 用占位摘要替换。它适合在展示、日志、后续 summary 构建时使用，避免把大段 PDF/检索输出反复塞回上下文。
+
+## 10. CLI
 
 `ai_researcher_assistant/cli.py` 使用 Typer 实现命令入口，并在 `pyproject.toml` 中注册：
 
@@ -222,7 +302,7 @@ ai-researcher = "ai_researcher_assistant.cli:main"
 
 CLI 边界：命令只做参数解析、输入加载和输出格式化，核心行为委托给 `ResearcherAgent`、`AgentCliSession`、`SkillLoader` 和 `AcademicRAG`。
 
-## 10. 持续 CLI Session
+## 11. 持续 CLI Session
 
 新增 `cli_session.py`，核心类型是 `AgentCliSession`。
 
@@ -260,7 +340,7 @@ ai-researcher chat --cwd .
 python -m ai_researcher_assistant.cli chat --cwd .
 ```
 
-## 11. 本地 PDF 入库
+## 12. 本地 PDF 入库
 
 `rag ingest-pdf` 的数据流：
 
@@ -289,7 +369,7 @@ ai-researcher chat --cwd .
 ai-researcher rag ingest-pdf https://example.org/paper.pdf --output papers.jsonl --title "External Paper"
 ```
 
-## 12. 非 arXiv 来源扩展
+## 13. 非 arXiv 来源扩展
 
 论文来源不应写死在 RAG 或 LLM adapter 中。每个来源应作为单独 Source Skill：
 
@@ -342,7 +422,7 @@ Source Skill 不负责：
 }
 ```
 
-## 13. 工程化
+## 14. 工程化
 
 `pyproject.toml`：
 
@@ -354,7 +434,7 @@ Source Skill 不负责：
 
 `Makefile` 和 GitHub Actions 覆盖格式化、lint、类型检查、编译、测试、依赖检查和构建。
 
-## 14. 测试
+## 15. 测试
 
 当前测试覆盖：
 
@@ -374,6 +454,12 @@ Source Skill 不负责：
 - Markdown Skill 与 Agent flow。
 - `rag_search` 使用当前 context 中的 `AcademicRAG`。
 - 父 Agent 通过 `subagent_task` 委托给 summary-only 子 Agent。
+- `TaskBoard` 依赖解锁和自主认领。
+- `TeamMailbox` JSONL 消息发送、读取和 drain。
+- `ProtocolStore` 请求响应审批状态机。
+- `WorktreeIndex` 任务绑定和事件流。
+- `ContextCompactor` 旧 observation 压缩。
+- `harness_coordination` Skill 持久化状态。
 
 推荐质量门：
 
@@ -388,7 +474,7 @@ python -m ai_researcher_assistant.cli doctor --json
 python -m ai_researcher_assistant.cli chat --help
 ```
 
-## 15. 后续规划
+## 16. 后续规划
 
 P0：
 
@@ -396,6 +482,7 @@ P0：
 - 给 `rag ingest-pdf` 增加批量目录导入。
 - 为 Source Skill 增加标准化基类和示例实现。
 - 为 `SubagentSpec` 增加可配置加载方式，例如从项目级 YAML 或 Markdown agent profile 加载。
+- 为后台任务增加安全执行器，让长耗时命令只通过 PermissionPolicy 允许的命令模板运行，并把完成通知写入 TeamMailbox。
 
 P1：
 
@@ -404,6 +491,7 @@ P1：
 - 增加 CLI 中的本地知识库保存/恢复能力。
 - 增加 `py.typed`。
 - 增加子 Agent 执行 trace 的评测样例，验证 summary-only 上下文隔离。
+- 为 `harness_coordination` 增加 CLI 子命令，例如 `ai-researcher tasks list` 和 `ai-researcher team inbox`。
 
 P2：
 
@@ -411,8 +499,9 @@ P2：
 - 增加评测 harness，用固定 mock LLM trace 回放 Agent 流程。
 - 增加 release artifact 验证、changelog 和版本发布流程。
 - 在保持本地默认路径的前提下，评估 MCP 工具协议和 A2A 多 Agent 协议适配层。
+- 在 worktree 绑定基础上增加显式 `git worktree` 适配器，并要求每次 remove/force 操作通过权限策略。
 
-## 16. 维护规则
+## 17. 维护规则
 
 - 新依赖必须更新 `pyproject.toml`、文档和测试。
 - 新 context key 必须更新 `harness/context.py`。

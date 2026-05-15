@@ -116,6 +116,7 @@ class SkillLoader:
             "ai_researcher_assistant.skills.builtin.arxiv_fetcher.ArxivFetcherSkill",
             "ai_researcher_assistant.skills.builtin.paper_reader.PaperReaderSkill",
             "ai_researcher_assistant.skills.builtin.paper_writer.PaperWriterSkill",
+            "ai_researcher_assistant.skills.builtin.harness_coordination.HarnessCoordinationSkill",
             "ai_researcher_assistant.skills.builtin.rag_search.RagSearchSkill",
             "ai_researcher_assistant.skills.builtin.subagent_task.SubagentTaskSkill",
         ]

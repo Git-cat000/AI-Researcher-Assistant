@@ -23,6 +23,8 @@ Chinese documentation is available in [README.zh-CN.md](README.zh-CN.md). The de
 - Keeps skills deterministic: skills return structured observations and do not call the LLM.
 - Supports local parent-child agent delegation through `subagent_task`; child agents run with isolated context and return summary-only results.
 - Provides a built-in `rag_search` skill so loops and subagents can query the current local RAG memory.
+- Adds a durable `harness_coordination` skill for task DAGs, team mailboxes, request/response protocols, and worktree binding metadata.
+- Uses compact skill catalogs in the system prompt; detailed skill knowledge is loaded through tool observations instead of bloating every turn.
 - Provides local dependency-free RAG with hash embeddings and optional ChromaDB persistence.
 - Supports hybrid vector + BM25-style retrieval, filters, lightweight reranking, citation metadata, and citation graph export.
 - Tracks harness-level actions, observations, permissions, token budgets, and model token usage.
@@ -206,6 +208,20 @@ writing_agent            -> paper_writer, rag_search
 ```
 
 This keeps the parent context compact while allowing focused child work. Subagents are local in-process runners, not MCP or A2A remote agents. Skills still do not call the LLM directly; the child loop owns model reasoning.
+
+## Harness Coordination
+
+The harness now includes a lightweight local control plane inspired by the later `learn-claude-code` examples:
+
+```text
+.ai-researcher/
+  tasks/                 persistent task DAG
+  team/inbox/            JSONL mailboxes
+  team/protocols.json    request/response FSM records
+  worktrees/             task-to-worktree binding index and event log
+```
+
+Use the `harness_coordination` skill when a research project needs work that survives context compaction or spans multiple local agents. It supports task creation, dependency clearing, ownership claims, mailbox send/read, protocol approval/rejection, and worktree binding records. The worktree layer records isolation intent and lifecycle events; it does not run destructive git commands.
 
 ## Beyond arXiv Sources
 

@@ -1,6 +1,17 @@
 """Harness contracts for the agent runtime."""
 
 from ai_researcher_assistant.harness.context import AgentContext
+from ai_researcher_assistant.harness.coordination import (
+    ContextCompactor,
+    ProtocolRequest,
+    ProtocolStore,
+    TaskBoard,
+    TaskRecord,
+    TeamMailbox,
+    TeamMessage,
+    WorktreeIndex,
+    default_coordination_root,
+)
 from ai_researcher_assistant.harness.parsing import (
     extract_action,
     extract_final_answer,
@@ -18,6 +29,15 @@ from ai_researcher_assistant.harness.schema import (
 
 __all__ = [
     "AgentContext",
+    "TaskBoard",
+    "TaskRecord",
+    "TeamMailbox",
+    "TeamMessage",
+    "ProtocolStore",
+    "ProtocolRequest",
+    "WorktreeIndex",
+    "ContextCompactor",
+    "default_coordination_root",
     "Action",
     "CostTracker",
     "Observation",

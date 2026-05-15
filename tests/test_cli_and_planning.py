@@ -7,6 +7,13 @@ from typer.testing import CliRunner
 
 from ai_researcher_assistant.cli import app
 from ai_researcher_assistant.cli_session import AgentCliSession
+from ai_researcher_assistant.harness.coordination import (
+    ContextCompactor,
+    ProtocolStore,
+    TaskBoard,
+    TeamMailbox,
+    WorktreeIndex,
+)
 from ai_researcher_assistant.harness.schema import Action, CostTracker, PermissionPolicy, TokenBudget
 from ai_researcher_assistant.llm import LLMResponse, get_model_capability
 from ai_researcher_assistant.memory import AcademicRAG
@@ -204,3 +211,64 @@ def test_builtin_rag_search_skill_uses_context_rag():
 
     assert result["success"] is True
     assert result["result"]["papers"][0]["title"] == "Local RAG Paper"
+
+
+def test_coordination_task_protocol_mailbox_and_worktree(tmp_path):
+    board = TaskBoard(tmp_path / "tasks")
+    first = board.create("Parse papers")
+    second = board.create("Write synthesis", blocked_by=[first.id])
+
+    assert board.ready_tasks()[0].id == first.id
+    board.update(first.id, status="completed")
+    assert board.get(second.id).blocked_by == []
+
+    claimed = board.claim_next("writer")
+    assert claimed is not None
+    assert claimed.owner == "writer"
+
+    mailbox = TeamMailbox(tmp_path / "team" / "inbox")
+    mailbox.send("lead", "writer", "Please draft the summary.")
+    assert mailbox.read("writer", drain=True)[0]["content"] == "Please draft the summary."
+    assert mailbox.read("writer") == []
+
+    protocols = ProtocolStore(tmp_path / "team" / "protocols.json")
+    request = protocols.create("plan_approval", "writer", "lead", {"plan": "Draft then verify."})
+    response = protocols.respond(request.id, approve=True, responder="lead", feedback="Approved.")
+    assert response.status == "approved"
+
+    worktrees = WorktreeIndex(tmp_path / "worktrees", task_board=board)
+    binding = worktrees.bind("draft-isolation", task_id=claimed.id)
+    assert binding["status"] == "active"
+    worktrees.mark("draft-isolation", "removed", complete_task=True)
+    assert board.get(claimed.id).status == "completed"
+    assert worktrees.events()[-1]["event"] == "worktree.removed"
+
+
+def test_context_compactor_replaces_old_observations():
+    class Step:
+        def __init__(self, observation):
+            self.observation = observation
+
+        def to_dict(self):
+            return {"action": {"skill": "paper_reader"}, "observation": self.observation}
+
+    steps = [Step("x" * 1000), Step("recent")]
+    compacted = ContextCompactor(keep_recent=1, max_observation_chars=20).compact_steps(steps)
+
+    assert compacted[0]["observation"] == "[compacted: previous observation from paper_reader]"
+    assert compacted[1]["observation"] == "recent"
+
+
+def test_harness_coordination_skill_persists_state(tmp_path):
+    registry = SkillRegistry()
+    SkillLoader(registry).load_builtin_skills()
+
+    created = registry.execute(
+        "harness_coordination",
+        {"action": "task_create", "subject": "Build task graph"},
+        {"cwd": tmp_path},
+    )
+    listed = registry.execute("harness_coordination", {"action": "task_list"}, {"cwd": tmp_path})
+
+    assert created["success"] is True
+    assert listed["result"]["tasks"][0]["subject"] == "Build task graph"
