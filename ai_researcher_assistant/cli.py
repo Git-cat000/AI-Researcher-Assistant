@@ -10,6 +10,11 @@ from typing import Annotated, Any
 import typer
 
 from ai_researcher_assistant import __version__
+from ai_researcher_assistant.cli_session import (
+    AgentCliSession,
+    append_record_jsonl,
+    paper_record_from_pdf,
+)
 from ai_researcher_assistant.core.config import load_config_from_env
 from ai_researcher_assistant.llm import list_model_capabilities
 from ai_researcher_assistant.memory import AcademicRAG
@@ -95,6 +100,42 @@ def ask(
     agent = ResearcherAgent(config=config, enable_builtin_skills=False, skill_registry=registry)
     answer = asyncio.run(agent.aprocess(task))
     typer.echo(answer)
+
+
+@app.command()
+def chat(
+    cwd: Annotated[Path, typer.Option("--cwd", help="Working directory for this long-running session.")] = Path("."),
+    provider: Annotated[str | None, typer.Option("--provider", help="Override configured LLM provider.")] = None,
+    model: Annotated[str | None, typer.Option("--model", help="Override configured LLM model.")] = None,
+    base_url: Annotated[
+        str | None,
+        typer.Option("--base-url", help="Override OpenAI-compatible or Ollama base URL."),
+    ] = None,
+    skills_dir: Annotated[
+        list[Path] | None,
+        typer.Option("--skills-dir", help="Directory or SKILL.md file to load."),
+    ] = None,
+    no_builtin: Annotated[bool, typer.Option("--no-builtin", help="Do not load built-in skills.")] = False,
+    no_auto_rag: Annotated[
+        bool,
+        typer.Option("--no-auto-rag", help="Do not attach local RAG context automatically to normal prompts."),
+    ] = False,
+) -> None:
+    """Start a persistent Claude Code-like terminal session in one working directory."""
+
+    asyncio.run(
+        _run_chat(
+            AgentCliSession(
+                cwd=cwd,
+                provider=provider,
+                model=model,
+                base_url=base_url,
+                skills_dir=skills_dir,
+                no_builtin=no_builtin,
+                auto_rag=not no_auto_rag,
+            )
+        )
+    )
 
 
 @skills_app.command("list")
@@ -201,6 +242,35 @@ def rag_graph(
     _emit(rag.citation_graph(), json_output)
 
 
+@rag_app.command("ingest-pdf")
+def rag_ingest_pdf(
+    source: Annotated[str, typer.Argument(help="Local PDF path or direct PDF URL.")],
+    output: Annotated[Path | None, typer.Option("--output", help="Append normalized paper record to JSONL.")] = None,
+    title: Annotated[str | None, typer.Option("--title", help="Override detected paper title.")] = None,
+    author: Annotated[list[str] | None, typer.Option("--author", help="Author name; can be repeated.")] = None,
+    arxiv_id: Annotated[str | None, typer.Option("--arxiv-id", help="Optional arXiv ID or stable paper ID.")] = None,
+    category: Annotated[list[str] | None, typer.Option("--category", help="Category/tag; can be repeated.")] = None,
+    published_date: Annotated[str | None, typer.Option("--published-date", help="Publication date string.")] = None,
+    max_pages: Annotated[int, typer.Option("--max-pages", help="Maximum pages to read, or 0 for all.")] = 0,
+    json_output: Annotated[bool, typer.Option("--json", help="Output machine-readable JSON.")] = False,
+) -> None:
+    """Parse a local PDF or direct PDF URL into a normalized JSONL paper record."""
+
+    record = paper_record_from_pdf(
+        source,
+        title=title,
+        authors=author,
+        arxiv_id=arxiv_id,
+        categories=category,
+        published_date=published_date,
+        max_pages=max_pages,
+    )
+    if output:
+        append_record_jsonl(output, record)
+    payload = {"record": record, "output": str(output) if output else None}
+    _emit(payload, json_output)
+
+
 def _load_rag_from_jsonl(path: Path) -> AcademicRAG:
     rag = AcademicRAG()
     with path.open("r", encoding="utf-8") as handle:
@@ -234,6 +304,54 @@ def _emit(payload: Any, json_output: bool) -> None:
             typer.echo(f"{key}: {value}")
     else:
         typer.echo(str(payload))
+
+
+async def _run_chat(session: AgentCliSession) -> None:
+    try:
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.completion import WordCompleter
+        from prompt_toolkit.history import FileHistory
+        from prompt_toolkit.patch_stdout import patch_stdout
+        from rich.console import Console
+        from rich.markdown import Markdown
+    except ImportError as exc:
+        raise typer.BadParameter("Interactive chat requires prompt-toolkit and rich to be installed.") from exc
+
+    state_dir = session.cwd / ".ai-researcher"
+    state_dir.mkdir(exist_ok=True)
+    prompt_session: PromptSession[str] = PromptSession(
+        history=FileHistory(str(state_dir / "history.txt")),
+        completer=WordCompleter(
+            ["/help", "/pwd", "/skills", "/stats", "/model", "/rag", "/clear", "/exit", "/quit"],
+            ignore_case=True,
+        ),
+    )
+    console = Console()
+    console.print(f"[bold]AI Researcher Assistant[/bold] session: {session.cwd}")
+    console.print("Type /help for commands. Type /exit to quit.")
+
+    with patch_stdout():
+        while True:
+            try:
+                user_input = (await prompt_session.prompt_async("research> ")).strip()
+            except (EOFError, KeyboardInterrupt):
+                console.print("Bye.")
+                break
+            if not user_input:
+                continue
+            if user_input.startswith("/"):
+                result = session.handle_command(user_input)
+                if result.output:
+                    console.print(Markdown(result.output) if result.markdown else result.output)
+                if result.should_exit:
+                    break
+                continue
+            try:
+                with console.status("Thinking...", spinner="dots"):
+                    answer = await session.ask(user_input)
+                console.print(Markdown(answer))
+            except Exception as exc:
+                console.print(f"[red]Error:[/red] {exc}")
 
 
 def main() -> None:

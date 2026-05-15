@@ -6,6 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from ai_researcher_assistant.cli import app
+from ai_researcher_assistant.cli_session import AgentCliSession
 from ai_researcher_assistant.harness.schema import Action, CostTracker, PermissionPolicy, TokenBudget
 from ai_researcher_assistant.llm import LLMResponse, get_model_capability
 from ai_researcher_assistant.memory import AcademicRAG
@@ -50,6 +51,58 @@ def test_cli_rag_search_jsonl(tmp_path):
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["results"][0]["arxiv_id"] == "2401.10000"
+
+
+def test_cli_rag_ingest_pdf_writes_jsonl(monkeypatch, tmp_path):
+    def fake_record_from_pdf(source, **kwargs):
+        return {
+            "title": kwargs.get("title") or "Local Paper",
+            "abstract": "Local PDF abstract",
+            "full_text": "Local PDF full text",
+            "authors": kwargs.get("authors") or [],
+            "arxiv_id": kwargs.get("arxiv_id"),
+            "categories": kwargs.get("categories") or [],
+            "published_date": kwargs.get("published_date"),
+            "citations": [],
+            "metadata": {"source": source},
+        }
+
+    monkeypatch.setattr("ai_researcher_assistant.cli.paper_record_from_pdf", fake_record_from_pdf)
+    output = tmp_path / "papers.jsonl"
+    result = CliRunner().invoke(
+        app,
+        ["rag", "ingest-pdf", "paper.pdf", "--output", str(output), "--title", "Test PDF", "--json"],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(output.read_text(encoding="utf-8"))["title"] == "Test PDF"
+    assert json.loads(result.stdout)["output"] == str(output)
+
+
+def test_agent_cli_session_rag_commands(tmp_path):
+    paper_jsonl = tmp_path / "papers.jsonl"
+    paper_jsonl.write_text(
+        json.dumps(
+            {
+                "title": "Session RAG Paper",
+                "abstract": "A paper about persistent command line research sessions.",
+                "authors": ["CLI Researcher"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    session = AgentCliSession(cwd=tmp_path)
+    loaded = session.handle_command("/rag load papers.jsonl")
+    search = session.handle_command("/rag search command line sessions")
+    stats = session.handle_command("/stats")
+    exit_result = session.handle_command("/exit")
+
+    assert "Loaded 1 paper records" in loaded.output
+    assert "Session RAG Paper" in search.output
+    assert json.loads(stats.output)["rag_papers"] == 1
+    assert exit_result.should_exit is True
 
 
 def test_markdown_skill_schema_resource_policy(tmp_path):
