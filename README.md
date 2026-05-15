@@ -1,5 +1,11 @@
 # AI Researcher Assistant
 
+## 中文目录
+
+- [中文说明](README.zh-CN.md)
+- [中文技术文档](TECHNICAL_DESIGN.zh-CN.md)
+- [English Technical Design](TECHNICAL_DESIGN.md)
+
 AI Researcher Assistant is a modular academic research-agent harness. It combines model adapters, memory/RAG, tool-like skills, and orchestration loops for paper discovery, PDF reading, literature memory, and academic writing assistance.
 
 The core rule is:
