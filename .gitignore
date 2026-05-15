@@ -9,6 +9,7 @@ htmlcov/
 .venv/
 venv/
 .env
+.claude/
 data/
 build/
 dist/
